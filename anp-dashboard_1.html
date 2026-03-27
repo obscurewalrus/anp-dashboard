@@ -464,8 +464,27 @@ function parseANPAgenda(text) {
     if (!m) return 99999;
     return (dutchMonths[m[2].toLowerCase()] || 0) * 100 + parseInt(m[1], 10);
   }
-  const dates = [...new Set(items.map(it => it.date))].sort((a, b) => dateSortKey(a) - dateSortKey(b));
-  return { items, dates, meta: meta.trim() };
+
+  // Filter out past dates: only keep today and future
+  function isDateTodayOrFuture(d) {
+    const m = d.match(/(\d+)\s+(\w+)/);
+    if (!m) return true; // keep items with unparseable dates
+    const day = parseInt(m[1], 10);
+    const month = dutchMonths[m[2].toLowerCase()];
+    if (!month) return true;
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // Try current year first; if the date seems far in the past, assume next year
+    let itemDate = new Date(now.getFullYear(), month - 1, day);
+    if (itemDate < new Date(now.getFullYear(), now.getMonth() - 1, 1)) {
+      itemDate = new Date(now.getFullYear() + 1, month - 1, day);
+    }
+    return itemDate >= today;
+  }
+
+  const filteredByDate = items.filter(it => isDateTodayOrFuture(it.date));
+  const dates = [...new Set(filteredByDate.map(it => it.date))].sort((a, b) => dateSortKey(a) - dateSortKey(b));
+  return { items: filteredByDate, dates, meta: meta.trim() };
 }
 
 // Toast component
