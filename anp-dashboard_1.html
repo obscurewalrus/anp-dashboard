@@ -238,6 +238,9 @@
   }
   .cat-btn:hover { background: #f3f4f6; }
   .cat-btn.active { font-weight: 600; color: #111; background: #f3f4f6; }
+  .cat-btn.partial { color: #374151; background: #f9fafb; }
+  .cat-btn.cat-child { padding-left: 22px; font-size: 11px; }
+  .group-chevron { margin-left: auto; font-size: 10px; color: #9ca3af; }
   .cat-dot {
     width: 8px;
     height: 8px;
@@ -371,6 +374,26 @@
 <div id="root"></div>
 <script type="text/babel">
 const { useState, useMemo, useCallback, useEffect, useRef } = React;
+
+// ANP taxonomy: parent → children mapping
+const CATEGORY_TAXONOMY = {
+  "Sport": ["Sport Algemeen", "Sport Highlights", "Voetbal Overig", "Eredivisie", "Autosport", "Wielrennen", "Tennis", "Schaatsen", "Formule 1"],
+  "Politiek": ["TK Plenair", "Tweede Kamer plenair", "Tweede Kamer commissies", "Eerste Kamer plenair", "Verkiezingen"],
+  "Rechtbank": ["Rechtbankzaken", "Raad van State", "Uitspraken", "Requisitoir"],
+  "Economie": ["Macro-economie", "Bedrijfsresultaten"],
+  "Entertainment": ["Entertainment BIN", "Entertainment BUI", "Kunst & Cultuur"],
+  "Koninklijk Huis": ["Royalty BIN"],
+  "Buitenland": ["Brussel", "NAVO"],
+  "Klimaat": ["Klimaat en duurzaamheid"],
+};
+
+// Reverse lookup: child → parent
+const CHILD_TO_PARENT = {};
+for (const [parent, children] of Object.entries(CATEGORY_TAXONOMY)) {
+  for (const child of children) {
+    CHILD_TO_PARENT[child] = parent;
+  }
+}
 
 const CATEGORY_COLORS = {
   "Binnenland": "#2563eb",
@@ -606,6 +629,34 @@ function ANPDashboard() {
     return [...catSet].sort();
   }, [items]);
 
+  // Build grouped category structure for sidebar
+  const groupedCats = useMemo(() => {
+    const catSet = new Set(allCats);
+    const groups = [];
+    const usedCats = new Set();
+
+    // Build groups from taxonomy
+    for (const [parent, children] of Object.entries(CATEGORY_TAXONOMY)) {
+      const presentChildren = children.filter(c => catSet.has(c));
+      const parentPresent = catSet.has(parent);
+      if (parentPresent || presentChildren.length > 0) {
+        const members = [];
+        if (parentPresent) members.push(parent);
+        members.push(...presentChildren);
+        groups.push({ label: parent, members });
+        members.forEach(c => usedCats.add(c));
+      }
+    }
+
+    // Add ungrouped categories
+    const ungrouped = allCats.filter(c => !usedCats.has(c));
+    for (const cat of ungrouped) {
+      groups.push({ label: cat, members: [cat] });
+    }
+
+    return groups;
+  }, [allCats]);
+
   const filteredItems = useMemo(() => {
     return items.filter(it => {
       if (activeDate && it.date !== activeDate) return false;
@@ -628,6 +679,19 @@ function ANPDashboard() {
       const next = new Set(prev);
       if (next.has(cat)) next.delete(cat);
       else next.add(cat);
+      return next;
+    });
+  }, []);
+
+  const toggleGroup = useCallback((members) => {
+    setActiveCats(prev => {
+      const next = new Set(prev);
+      const allActive = members.every(c => next.has(c));
+      if (allActive) {
+        members.forEach(c => next.delete(c));
+      } else {
+        members.forEach(c => next.add(c));
+      }
       return next;
     });
   }, []);
@@ -739,25 +803,55 @@ function ANPDashboard() {
 
           <div className="sidebar-heading" style={{ marginTop: 8 }}>Categorie</div>
           <div style={{ maxHeight: 400, overflowY: "auto" }}>
-            {allCats.map(cat => {
-              const isActive = activeCats.has(cat);
-              const count = items.filter(it => it.cats.includes(cat) && (!activeDate || it.date === activeDate)).length;
+            {groupedCats.map(group => {
+              const isMulti = group.members.length > 1;
+              const allActive = group.members.every(c => activeCats.has(c));
+              const someActive = group.members.some(c => activeCats.has(c));
+              const groupCount = items.filter(it =>
+                it.cats.some(c => group.members.includes(c)) && (!activeDate || it.date === activeDate)
+              ).length;
+              const groupColor = getCatColor(group.members[0]);
+
               return (
-                <button
-                  key={cat}
-                  className={`cat-btn${isActive ? " active" : ""}`}
-                  onClick={() => toggleCat(cat)}
-                >
-                  <span
-                    className="cat-dot"
-                    style={{
-                      backgroundColor: getCatColor(cat),
-                      opacity: isActive ? 1 : 0.5,
-                    }}
-                  />
-                  <span className="cat-name">{cat}</span>
-                  <span className="cat-count">{count}</span>
-                </button>
+                <div key={group.label}>
+                  <button
+                    className={`cat-btn${allActive ? " active" : someActive ? " partial" : ""}`}
+                    onClick={() => isMulti ? toggleGroup(group.members) : toggleCat(group.members[0])}
+                  >
+                    <span
+                      className="cat-dot"
+                      style={{
+                        backgroundColor: groupColor,
+                        opacity: allActive ? 1 : someActive ? 0.75 : 0.5,
+                      }}
+                    />
+                    <span className="cat-name">{group.label}</span>
+                    <span className="cat-count">{groupCount}</span>
+                    {isMulti && <span className="group-chevron">{someActive ? "▾" : "▸"}</span>}
+                  </button>
+                  {isMulti && someActive && group.members.map(cat => {
+                    const isActive = activeCats.has(cat);
+                    const count = items.filter(it => it.cats.includes(cat) && (!activeDate || it.date === activeDate)).length;
+                    if (count === 0) return null;
+                    return (
+                      <button
+                        key={cat}
+                        className={`cat-btn cat-child${isActive ? " active" : ""}`}
+                        onClick={() => toggleCat(cat)}
+                      >
+                        <span
+                          className="cat-dot"
+                          style={{
+                            backgroundColor: getCatColor(cat),
+                            opacity: isActive ? 1 : 0.5,
+                          }}
+                        />
+                        <span className="cat-name">{cat}</span>
+                        <span className="cat-count">{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               );
             })}
           </div>
