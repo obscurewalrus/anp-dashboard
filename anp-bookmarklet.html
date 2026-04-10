@@ -44,40 +44,6 @@
     margin-bottom: 28px;
     line-height: 1.5;
   }
-  .config {
-    background: #0f172a;
-    border: 1px solid #334155;
-    border-radius: 8px;
-    padding: 16px;
-    margin-bottom: 24px;
-  }
-  .config-label {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: #94a3b8;
-    margin-bottom: 8px;
-    display: block;
-  }
-  .config input {
-    width: 100%;
-    padding: 10px 12px;
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 6px;
-    color: #e2e8f0;
-    font-size: 13px;
-    font-family: 'SF Mono', Menlo, Consolas, monospace;
-    outline: none;
-    transition: border-color 0.15s;
-  }
-  .config input:focus { border-color: #3b82f6; }
-  .config-hint {
-    font-size: 11px;
-    color: #64748b;
-    margin-top: 6px;
-  }
   .bookmarklet-link {
     display: inline-block;
     padding: 14px 28px;
@@ -97,18 +63,35 @@
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
   }
-  .bookmarklet-link.disabled {
-    background: #334155;
-    border-color: #475569;
-    cursor: not-allowed;
-    pointer-events: none;
-    opacity: 0.5;
-  }
   .bookmarklet-link:active { cursor: grabbing; }
   .hint {
     font-size: 12px;
     color: #64748b;
+    margin-bottom: 12px;
+  }
+  .target-url {
+    font-size: 11px;
+    color: #475569;
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
     margin-bottom: 28px;
+    word-break: break-all;
+  }
+  .target-url strong { color: #94a3b8; }
+  .error-box {
+    background: #7f1d1d;
+    border: 1px solid #991b1b;
+    color: #fecaca;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .error-box code {
+    background: #450a0a;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
   }
   .steps {
     border-top: 1px solid #334155;
@@ -173,10 +156,15 @@
     Werkt op <code>app.anp.nl</code> (ingelogd).
   </p>
 
-  <a id="bookmarkletLink" class="bookmarklet-link" href="#">
+  <div id="errorBox"></div>
+
+  <a id="bookmarkletLink" class="bookmarklet-link" href="javascript:alert('Pagina%20laadt%20nog,%20wacht%20even%20en%20probeer%20opnieuw.')">
     📋 ANP Agenda Ophalen
   </a>
   <div class="hint">← Sleep deze knop naar je bladwijzerbalk</div>
+  <div class="target-url">
+    Dashboard: <strong id="targetUrl">(wordt bepaald...)</strong>
+  </div>
 
   <div class="steps">
     <h2>Installatie</h2>
@@ -206,10 +194,6 @@
       <div class="step-num">•</div>
       <div class="step-text">Bij geblokkeerde popups: fallback naar klembord</div>
     </div>
-    <div class="step">
-      <div class="step-num">•</div>
-      <div class="step-text">Broncode: <code>anp-bookmarklet.js</code></div>
-    </div>
   </div>
 
   <div class="version">
@@ -219,29 +203,151 @@
 
 <script>
 // ═══════════════════════════════════════════════════════════════════
-// ⚙️  CONFIGUREER HIER ÉÉN KEER DE URL VAN JE DASHBOARD
-// ═══════════════════════════════════════════════════════════════════
-// Dit is de URL waar anp-dashboard.html staat. Pas dit aan vóór je
-// naar GitHub pusht. Daarna kun je deze pagina delen met collega's —
-// zij hoeven niets te configureren.
-//
-// Voorbeeld: "https://lucasbrouwers.github.io/anp-nieuwstools/anp-dashboard.html"
-const DASHBOARD_URL = https://obscurewalrus.github.io/anp-dashboard/anp-dashboard.html";
+// De bookmarklet wordt hier opgebouwd. De dashboard-URL wordt
+// automatisch afgeleid uit de huidige pagina-locatie: zorg dat
+// anp-dashboard.html in dezelfde map staat als dit bestand.
 // ═══════════════════════════════════════════════════════════════════
 
-// Bookmarklet template — __DASHBOARD_URL__ wordt hieronder vervangen.
-const BOOKMARKLET_CODE = `(function(){var DASHBOARD_URL="__DASHBOARD_URL__";var base="https://newsapi.anp.nl/services/";var hdrs={"api-version":"1.0","appid":"INZAGEWEB25"};var d=new Date();var ds=d.toISOString().split("T")[0];fetch(base+"calendars",{headers:hdrs,credentials:"include"}).then(function(r){return r.json()}).then(function(cj){if(cj.hasError||!cj.data){alert("Fout bij ophalen kalenders");return;}var cals=cj.data.filter(function(c){return /^\\d+$/.test(c.id);});var total=cals.length;var ps=cals.map(function(c){var url=base+"calendars/"+c.id+"/items?expand=list&count=200&fromDate="+ds+"&numDays=3";return fetch(url,{headers:hdrs,credentials:"include"}).then(function(r){return r.json()}).then(function(j){return{cat:c.name,items:(j.data&&j.data.items)||[]};}).catch(function(){return{cat:c.name,items:[]};});});Promise.all(ps).then(function(results){var seen={};var all=[];results.forEach(function(r){r.items.forEach(function(it){var id=it.id;if(!seen[id]){seen[id]=true;var st=it.eventStart?new Date(it.eventStart):null;all.push({title:it.title||"Zonder titel",intro:it.introText||"",start:st,date:st?st.toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long"}):"Geen datum",time:st?st.toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"}):"",cats:[r.cat]});}else{for(var i=0;i<all.length;i++){if(all[i].title===it.title){if(all[i].cats.indexOf(r.cat)===-1)all[i].cats.push(r.cat);break;}}}});});var dates={};var dateOrder=[];all.forEach(function(a){if(!dates[a.date]){dates[a.date]=[];dateOrder.push(a.date);}dates[a.date].push(a);});Object.keys(dates).forEach(function(k){dates[k].sort(function(a,b){if(!a.start)return 1;if(!b.start)return -1;return a.start-b.start;});});var s="ANP AGENDA (opgehaald "+d.toLocaleString("nl-NL")+")\\n";s+="Periode: "+ds+" + 2 dagen | Kalenders: "+total+" | Items: "+all.length+"\\n";s+="==================================================\\n\\n";dateOrder.forEach(function(dt){s+="## "+dt+"\\n\\n";dates[dt].forEach(function(it){if(it.time)s+=it.time+" | ";s+=it.title;s+=" ["+it.cats.join(", ")+"]";s+="\\n";if(it.intro)s+="  "+it.intro+"\\n";s+="\\n";});});var dataSent=false;var ml=function(ev){if(!dataSent&&ev.data&&ev.data.type==="ANP_DASHBOARD_READY"&&ev.source){ev.source.postMessage({type:"ANP_AGENDA_DATA",text:s},"*");dataSent=true;window.removeEventListener("message",ml);}};window.addEventListener("message",ml);var dw=window.open(DASHBOARD_URL+"?autoload=1","_blank");if(!dw){window.removeEventListener("message",ml);navigator.clipboard.writeText(s).then(function(){alert("Popup geblokkeerd. "+all.length+" items naar klembord. Plak handmatig.");}).catch(function(){alert("Popup geblokkeerd. Sta popups toe voor app.anp.nl.");});return;}setTimeout(function(){if(!dataSent){window.removeEventListener("message",ml);navigator.clipboard.writeText(s).catch(function(){});}},30000);}).catch(function(e){alert("Fout bij items: "+e.message);});}).catch(function(e){alert("Fout bij kalenders: "+e.message);});})()`;
+// De bookmarklet zelf — geschreven als gewone JS-functie. We doen
+// .toString() en wrappen in (fn)() om er een bookmarklet van te maken.
+// __DASHBOARD_URL__ is een placeholder die hieronder wordt vervangen.
+function anpBookmarklet() {
+  var DASHBOARD_URL = "__DASHBOARD_URL__";
+  var base = "https://newsapi.anp.nl/services/";
+  var hdrs = { "api-version": "1.0", "appid": "INZAGEWEB25" };
+  var d = new Date();
+  var ds = d.toISOString().split("T")[0];
 
-const bookmarkletLink = document.getElementById("bookmarkletLink");
-const code = BOOKMARKLET_CODE.replace("__DASHBOARD_URL__", DASHBOARD_URL);
-bookmarkletLink.href = "javascript:" + encodeURIComponent(code);
+  fetch(base + "calendars", { headers: hdrs, credentials: "include" })
+    .then(function (r) { return r.json(); })
+    .then(function (cj) {
+      if (cj.hasError || !cj.data) { alert("Fout bij ophalen kalenders"); return; }
+      var cals = cj.data.filter(function (c) { return /^\d+$/.test(c.id); });
+      var total = cals.length;
+      var ps = cals.map(function (c) {
+        var url = base + "calendars/" + c.id + "/items?expand=list&count=200&fromDate=" + ds + "&numDays=3";
+        return fetch(url, { headers: hdrs, credentials: "include" })
+          .then(function (r) { return r.json(); })
+          .then(function (j) { return { cat: c.name, items: (j.data && j.data.items) || [] }; })
+          .catch(function () { return { cat: c.name, items: [] }; });
+      });
+      Promise.all(ps).then(function (results) {
+        var seen = {}, all = [];
+        results.forEach(function (r) {
+          r.items.forEach(function (it) {
+            var id = it.id;
+            if (!seen[id]) {
+              seen[id] = true;
+              var st = it.eventStart ? new Date(it.eventStart) : null;
+              all.push({
+                title: it.title || "Zonder titel",
+                intro: it.introText || "",
+                start: st,
+                date: st ? st.toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long" }) : "Geen datum",
+                time: st ? st.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }) : "",
+                cats: [r.cat]
+              });
+            } else {
+              for (var i = 0; i < all.length; i++) {
+                if (all[i].title === it.title) {
+                  if (all[i].cats.indexOf(r.cat) === -1) all[i].cats.push(r.cat);
+                  break;
+                }
+              }
+            }
+          });
+        });
+        var dates = {}, dateOrder = [];
+        all.forEach(function (a) {
+          if (!dates[a.date]) { dates[a.date] = []; dateOrder.push(a.date); }
+          dates[a.date].push(a);
+        });
+        Object.keys(dates).forEach(function (k) {
+          dates[k].sort(function (a, b) {
+            if (!a.start) return 1;
+            if (!b.start) return -1;
+            return a.start - b.start;
+          });
+        });
+        var s = "ANP AGENDA (opgehaald " + d.toLocaleString("nl-NL") + ")\n";
+        s += "Periode: " + ds + " + 2 dagen | Kalenders: " + total + " | Items: " + all.length + "\n";
+        s += "==================================================\n\n";
+        dateOrder.forEach(function (dt) {
+          s += "## " + dt + "\n\n";
+          dates[dt].forEach(function (it) {
+            if (it.time) s += it.time + " | ";
+            s += it.title;
+            s += " [" + it.cats.join(", ") + "]";
+            s += "\n";
+            if (it.intro) s += "  " + it.intro + "\n";
+            s += "\n";
+          });
+        });
+        // postMessage handshake naar dashboard
+        var dataSent = false;
+        var ml = function (ev) {
+          if (!dataSent && ev.data && ev.data.type === "ANP_DASHBOARD_READY" && ev.source) {
+            ev.source.postMessage({ type: "ANP_AGENDA_DATA", text: s }, "*");
+            dataSent = true;
+            window.removeEventListener("message", ml);
+          }
+        };
+        window.addEventListener("message", ml);
+        var dw = window.open(DASHBOARD_URL + "?autoload=1", "_blank");
+        if (!dw) {
+          window.removeEventListener("message", ml);
+          navigator.clipboard.writeText(s)
+            .then(function () { alert("Popup geblokkeerd. " + all.length + " items naar klembord. Plak handmatig in dashboard."); })
+            .catch(function () { alert("Popup geblokkeerd. Sta popups toe voor app.anp.nl."); });
+          return;
+        }
+        setTimeout(function () {
+          if (!dataSent) {
+            window.removeEventListener("message", ml);
+            navigator.clipboard.writeText(s).catch(function () {});
+          }
+        }, 30000);
+      }).catch(function (e) { alert("Fout bij items: " + e.message); });
+    }).catch(function (e) { alert("Fout bij kalenders: " + e.message); });
+}
 
-// Waarschuw als de URL nog niet is aangepast
-if (DASHBOARD_URL.includes("USERNAME") || DASHBOARD_URL.includes("REPO")) {
-  const warning = document.createElement("div");
-  warning.style.cssText = "background:#7f1d1d;color:#fecaca;padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:13px;border:1px solid #991b1b;";
-  warning.innerHTML = "⚠ <strong>Configuratie nodig:</strong> open <code style='background:#450a0a;padding:1px 5px;border-radius:3px;'>anp-bookmarklet.html</code> en pas <code style='background:#450a0a;padding:1px 5px;border-radius:3px;'>DASHBOARD_URL</code> aan bovenaan het script.";
-  document.querySelector(".card").insertBefore(warning, document.querySelector(".steps"));
+// ─── Bouw de bookmarklet en zet de href ────────────────────────────
+function showError(html) {
+  var box = document.getElementById("errorBox");
+  box.className = "error-box";
+  box.innerHTML = html;
+}
+
+try {
+  // Hardcoded dashboard-URL
+  var dashboardUrl = "https://obscurewalrus.github.io/anp-dashboard/anp-dashboard.html";
+  document.getElementById("targetUrl").textContent = dashboardUrl;
+
+  // Waarschuw als we op file:// draaien — postMessage werkt dan vaak niet
+  if (window.location.protocol === "file:") {
+    showError(
+      "⚠ <strong>Let op:</strong> je opent dit bestand lokaal via <code>file://</code>. " +
+      "De bookmarklet werkt alleen als de pagina via <code>http://</code> of <code>https://</code> wordt geserveerd " +
+      "(bijvoorbeeld via GitHub Pages)."
+    );
+  }
+
+  // Bouw de bookmarklet-code
+  var fnSource = anpBookmarklet.toString();
+  var bookmarkletCode = "(" + fnSource + ")()";
+  var finalCode = bookmarkletCode.replace('"__DASHBOARD_URL__"', JSON.stringify(dashboardUrl));
+  var href = "javascript:" + encodeURIComponent(finalCode);
+
+  var link = document.getElementById("bookmarkletLink");
+  link.setAttribute("href", href);
+
+  // Log voor debugging
+  console.log("[ANP Bookmarklet] Dashboard URL:", dashboardUrl);
+  console.log("[ANP Bookmarklet] Bookmarklet length:", finalCode.length, "chars");
+  console.log("[ANP Bookmarklet] Href set successfully. Drag the link to your bookmarks bar.");
+} catch (e) {
+  showError("⚠ <strong>Fout bij opbouwen bookmarklet:</strong> " + e.message + "<br>Open de browser-console voor meer info.");
+  console.error("[ANP Bookmarklet] Build error:", e);
 }
 </script>
 
