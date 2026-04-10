@@ -1,9 +1,9 @@
 /**
- * ANP Agenda Bookmarklet — Broncode
+ * ANP Agenda Bookmarklet — Broncode (v3)
  *
- * Haalt de volledige ANP-nieuwsagenda op via de ANP API en kopieert deze
- * als geformatteerde tekst naar het klembord. Bedoeld om te draaien als
- * bookmarklet op app.anp.nl (sessiecookies vereist).
+ * Haalt de volledige ANP-nieuwsagenda op via de ANP API en stuurt deze
+ * direct door naar het ANP Dashboard via postMessage. Bedoeld om te draaien
+ * als bookmarklet op app.anp.nl (sessiecookies vereist).
  *
  * Werking:
  *   1. Haal alle kalender-ID's op via GET /services/calendars
@@ -11,40 +11,39 @@
  *   3. Fetch items per kalender (vandaag + 2 dagen)
  *   4. Dedupliceert op item-ID, merget categorieën bij duplicaten
  *   5. Groepeert per datum, sorteert op starttijd
- *   6. Formatteert naar clipboard-tekst (compatibel met ANP Dashboard parser)
+ *   6. Formatteert naar tekst (compatibel met dashboard parser)
+ *   7. Opent dashboard in nieuw tabblad en stuurt data via postMessage
+ *   8. Fallback: kopieer naar klembord als popup geblokkeerd is
  *
- * API-details:
- *   Base URL:  https://newsapi.anp.nl/services/
- *   Auth:      Sessiecookies via credentials: 'include'
- *   Headers:   api-version: 1.0, appid: INZAGEWEB25
+ * postMessage handshake:
+ *   - Bookmarklet voegt message-listener toe VOOR window.open
+ *   - Dashboard laadt met ?autoload=1 en stuurt {type:"ANP_DASHBOARD_READY"}
+ *   - Bookmarklet ontvangt READY en stuurt {type:"ANP_AGENDA_DATA", text:"..."}
+ *   - Dashboard parseert en toont de data automatisch
  *
- * Output-formaat (moet compatibel blijven met parseANPAgenda() in anp-dashboard):
- *   ANP AGENDA (opgehaald <datum>)
- *   Periode: YYYY-MM-DD + 2 dagen | Kalenders: N | Items: N
- *   ==================================================
- *
- *   ## <dagnaam> <dag> <maand>
- *
- *   HH:MM | Titel [Categorie1, Categorie2]
- *     Intro tekst
+ * Configuratie:
+ *   Pas DASHBOARD_URL aan naar de URL waar je dashboard staat.
+ *   Bijvoorbeeld: https://lucasbrouwers.github.io/anp-nieuwstools/anp-dashboard.html
  *
  * @see project-instructions.md voor volledige documentatie
- * @see anp-dashboard.jsx voor de parser die deze output consumeert
+ * @see anp-dashboard.html voor het dashboard dat deze data ontvangt
  */
 
 (function () {
   // ─── Configuratie ──────────────────────────────────────────────────
+  const DASHBOARD_URL =
+    "https://USERNAME.github.io/REPO/anp-dashboard.html"; // ← AANPASSEN
+
   const BASE_URL = "https://newsapi.anp.nl/services/";
   const HEADERS = {
     "api-version": "1.0",
     "appid": "INZAGEWEB25",
   };
-  const NUM_DAYS = 3; // vandaag + 2 dagen vooruit
+  const NUM_DAYS = 3;
   const MAX_ITEMS_PER_CALENDAR = 200;
 
-  // ─── Datumberekening ───────────────────────────────────────────────
   const now = new Date();
-  const fromDate = now.toISOString().split("T")[0]; // YYYY-MM-DD
+  const fromDate = now.toISOString().split("T")[0];
 
   // ─── Stap 1: Haal kalenderlijst op ────────────────────────────────
   fetch(BASE_URL + "calendars", {
@@ -58,18 +57,9 @@
         return;
       }
 
-      // Filter: alleen numerieke ID's zijn echte kalenders
-      // UUID-achtige ID's zijn bundle headers en worden overgeslagen
       const calendars = calendarResponse.data.filter((c) =>
         /^\d+$/.test(c.id)
       );
-
-      // Bouw een naam-lookup voor categorieën
-      const calendarNameMap = {};
-      calendars.forEach((c) => {
-        calendarNameMap[c.id] = c.name;
-      });
-
       const totalCalendars = calendars.length;
 
       // ─── Stap 2: Fetch items per kalender ─────────────────────────
@@ -111,7 +101,6 @@
               const id = apiItem.id;
 
               if (!seen[id]) {
-                // Nieuw item — eerste keer gezien
                 seen[id] = true;
                 const startDate = apiItem.eventStart
                   ? new Date(apiItem.eventStart)
@@ -135,11 +124,8 @@
                       })
                     : "",
                   cats: [result.category],
-                  products: (apiItem.plannedProducts || []).join(", "),
-                  words: apiItem.wordCount || 0,
                 });
               } else {
-                // Duplicaat — voeg categorie toe als die nog niet bestaat
                 for (let i = 0; i < allItems.length; i++) {
                   if (allItems[i].title === apiItem.title) {
                     if (allItems[i].cats.indexOf(result.category) === -1) {
@@ -164,7 +150,6 @@
             dateGroups[item.date].push(item);
           });
 
-          // Sorteer items binnen elke datum op starttijd
           Object.keys(dateGroups).forEach((dateKey) => {
             dateGroups[dateKey].sort((a, b) => {
               if (!a.start) return 1;
@@ -175,10 +160,8 @@
 
           // ─── Stap 5: Formatteer output ────────────────────────────
           // BELANGRIJK: Dit formaat moet compatibel blijven met
-          // parseANPAgenda() in anp-dashboard.jsx
+          // parseANPAgenda() in anp-dashboard.html
           let output = "";
-
-          // Header
           output +=
             "ANP AGENDA (opgehaald " + now.toLocaleString("nl-NL") + ")\n";
           output +=
@@ -192,58 +175,69 @@
           output +=
             "==================================================\n\n";
 
-          // Items per datum
           dateOrder.forEach((dateLabel) => {
             output += "## " + dateLabel + "\n\n";
-
             dateGroups[dateLabel].forEach((item) => {
-              // Tijdstip (optioneel)
-              if (item.time) {
-                output += item.time + " | ";
-              }
-
-              // Titel + categorieën
+              if (item.time) output += item.time + " | ";
               output += item.title;
               output += " [" + item.cats.join(", ") + "]";
               output += "\n";
-
-              // Intro (ingesprongen met 2 spaties voor parser-compatibiliteit)
-              if (item.intro) {
-                output += "  " + item.intro + "\n";
-              }
-
+              if (item.intro) output += "  " + item.intro + "\n";
               output += "\n";
             });
           });
 
-          // ─── Stap 6: Kopieer naar klembord ────────────────────────
-          navigator.clipboard
-            .writeText(output)
-            .then(() => {
-              alert(
-                "ANP agenda gekopieerd!\n" +
-                  allItems.length +
-                  " items uit " +
-                  totalCalendars +
-                  " kalenders."
+          // ─── Stap 6: Verstuur naar dashboard via postMessage ──────
+          // BELANGRIJK: listener moet bestaan VOOR window.open zodat
+          // we de READY-message van het dashboard kunnen ontvangen.
+          let dataSent = false;
+          const messageListener = function (event) {
+            if (
+              !dataSent &&
+              event.data &&
+              event.data.type === "ANP_DASHBOARD_READY" &&
+              event.source
+            ) {
+              event.source.postMessage(
+                { type: "ANP_AGENDA_DATA", text: output },
+                "*"
               );
-            })
-            .catch(() => {
-              // Fallback voor browsers zonder Clipboard API
-              const textarea = document.createElement("textarea");
-              textarea.value = output;
-              document.body.appendChild(textarea);
-              textarea.select();
-              document.execCommand("copy");
-              document.body.removeChild(textarea);
-              alert(
-                "ANP agenda gekopieerd!\n" +
-                  allItems.length +
-                  " items uit " +
-                  totalCalendars +
-                  " kalenders."
-              );
-            });
+              dataSent = true;
+              window.removeEventListener("message", messageListener);
+            }
+          };
+          window.addEventListener("message", messageListener);
+
+          const dashWindow = window.open(
+            DASHBOARD_URL + "?autoload=1",
+            "_blank"
+          );
+
+          if (!dashWindow) {
+            // Popup geblokkeerd — fallback naar klembord
+            window.removeEventListener("message", messageListener);
+            navigator.clipboard
+              .writeText(output)
+              .then(() => {
+                alert(
+                  "Popup geblokkeerd. " +
+                    allItems.length +
+                    " items naar klembord gekopieerd. Plak handmatig in dashboard."
+                );
+              })
+              .catch(() => {
+                alert("Popup geblokkeerd én klembord faalt. Sta popups toe.");
+              });
+            return;
+          }
+
+          // Timeout na 30s — opruimen als er niets reageert
+          setTimeout(() => {
+            if (!dataSent) {
+              window.removeEventListener("message", messageListener);
+              navigator.clipboard.writeText(output).catch(() => {});
+            }
+          }, 30000);
         })
         .catch((e) => {
           alert("Fout bij items: " + e.message);

@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ANP Agenda Dashboard — NRC Nieuwsmanager</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230f172a'/><text x='16' y='22' text-anchor='middle' fill='%23f1f5f9' font-size='18' font-family='serif' font-weight='bold'>A</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Source+Serif+4:wght@600;700&display=swap" rel="stylesheet">
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.9/babel.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body, #root { height: 100%; }
+  body {
+    font-family: 'Söhne', 'Helvetica Neue', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background: #f8fafc;
+  }
+  ::selection { background: #bfdbfe; }
+  textarea::selection { background: #60a5fa; color: #fff; }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+  /* Toast animation */
+  @keyframes toastIn {
+    from { transform: translateY(16px) scale(0.95); opacity: 0; }
+    to { transform: translateY(0) scale(1); opacity: 1; }
+  }
+  @keyframes toastOut {
+    from { transform: translateY(0) scale(1); opacity: 1; }
+    to { transform: translateY(-8px) scale(0.95); opacity: 0; }
+  }
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #0f172a;
+    color: #f1f5f9;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    z-index: 9999;
+    pointer-events: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    animation: toastIn 0.25s ease-out;
+  }
+  .toast.hiding { animation: toastOut 0.2s ease-in forwards; }
+
+  /* Paste view */
+  .paste-view {
+    min-height: 100vh;
+    background: #0f172a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+  }
+  .paste-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: #94a3b8;
+    margin-bottom: 8px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .paste-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: #f1f5f9;
+    font-family: 'Source Serif 4', Georgia, serif;
+  }
+  .paste-sub {
+    color: #64748b;
+    font-size: 14px;
+    margin: 8px 0 0;
+  }
+  .paste-textarea {
+    width: 100%;
+    max-width: 640px;
+    height: 320px;
+    padding: 16px;
+    border-radius: 8px;
+    border: 2px solid #334155;
+    background: #1e293b;
+    color: #e2e8f0;
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1.5;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .paste-textarea:focus { border-color: #3b82f6; }
+  .paste-textarea::placeholder { color: #475569; }
+  .paste-btn {
+    margin-top: 20px;
+    padding: 12px 40px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    background: #475569;
+    border: none;
+    border-radius: 8px;
+    cursor: not-allowed;
+    transition: background-color 0.15s;
+    letter-spacing: 0.02em;
+  }
+  .paste-btn.active {
+    background: #2563eb;
+    cursor: pointer;
+  }
+  .paste-btn.active:hover { background: #1d4ed8; }
+
+  /* Dashboard header */
+  .dash-header {
+    background: #0f172a;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .dash-header-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: #64748b;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .dash-header-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #f1f5f9;
+    font-family: 'Source Serif 4', Georgia, serif;
+  }
+  .header-btn {
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #94a3b8;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .header-btn:hover { background: #334155; color: #e2e8f0; }
+  .header-btn.star { color: #fbbf24; }
+  .header-btn.star:hover { background: #422006; border-color: #854d0e; }
+
+  /* Layout */
+  .dash-layout {
+    display: flex;
+    min-height: calc(100vh - 60px);
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    background: #fff;
+    border-right: 1px solid #e5e7eb;
+    padding: 16px;
+    overflow-y: auto;
+    max-height: calc(100vh - 60px);
+    position: sticky;
+    top: 60px;
+  }
+  .sidebar-search {
+    width: 100%;
+    padding: 7px 10px;
+    font-size: 13px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .sidebar-search:focus { border-color: #3b82f6; }
+  .sidebar-heading {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #6b7280;
+    margin-bottom: 6px;
+  }
+  .sidebar-btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 5px 8px;
+    font-size: 13px;
+    font-weight: 400;
+    color: #374151;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-bottom: 2px;
+    transition: all 0.1s;
+  }
+  .sidebar-btn:hover { background: #f3f4f6; }
+  .sidebar-btn.active { font-weight: 700; color: #1e40af; background: #dbeafe; }
+  .sidebar-btn.starred-active { font-weight: 700; color: #92400e; background: #fef3c7; }
+  .sidebar-count { float: right; font-size: 11px; color: #9ca3af; }
+
+  .cat-btn {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-weight: 400;
+    color: #4b5563;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-bottom: 1px;
+    gap: 6px;
+    transition: all 0.1s;
+  }
+  .cat-btn:hover { background: #f3f4f6; }
+  .cat-btn.active { font-weight: 600; color: #111; background: #f3f4f6; }
+  .cat-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    transition: opacity 0.15s;
+  }
+  .cat-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cat-count { font-size: 10px; color: #9ca3af; }
+  .clear-btn {
+    margin-top: 8px;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: #6b7280;
+    background: transparent;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    cursor: pointer;
+    width: 100%;
+    transition: all 0.15s;
+  }
+  .clear-btn:hover { background: #f3f4f6; border-color: #9ca3af; }
+
+  /* Items */
+  .status-bar {
+    padding: 12px 16px;
+    background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 13px;
+    color: #6b7280;
+  }
+  .status-bar strong { color: #111827; }
+  .item-row {
+    display: flex;
+    gap: 10px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #e5e7eb;
+    align-items: flex-start;
+    transition: background-color 0.15s;
+  }
+  .item-row:hover { background: #f8fafc; }
+  .item-row.starred { background: #fefce8; }
+  .item-row.expanded { background: #f8fafc; }
+  .star-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 2px;
+    line-height: 1;
+    flex-shrink: 0;
+    margin-top: 1px;
+    transition: transform 0.15s;
+  }
+  .star-btn:hover { transform: scale(1.2); }
+  .item-time {
+    width: 48px;
+    flex-shrink: 0;
+    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+    font-size: 13px;
+    color: #374151;
+    font-weight: 600;
+    margin-top: 2px;
+  }
+  .item-time.empty { color: #9ca3af; }
+  .item-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #111827;
+    line-height: 1.35;
+    margin-bottom: 3px;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .item-title.clickable { cursor: pointer; }
+  .item-arrow {
+    font-size: 11px;
+    color: #9ca3af;
+    flex-shrink: 0;
+    transition: transform 0.15s;
+    display: inline-block;
+  }
+  .item-arrow.open { transform: rotate(90deg); }
+  .item-intro {
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.5;
+    margin-bottom: 4px;
+  }
+  .item-intro.clickable { cursor: pointer; }
+  .item-intro .more {
+    color: #3b82f6;
+    font-weight: 600;
+    margin-left: 4px;
+    font-size: 11px;
+  }
+  .cat-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #fff;
+    margin-right: 4px;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    letter-spacing: 0.01em;
+  }
+  .empty-state {
+    padding: 40px;
+    text-align: center;
+    color: #9ca3af;
+    font-size: 14px;
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .sidebar { display: none; }
+    .dash-header { padding: 10px 12px; }
+    .header-buttons { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useMemo, useCallback, useEffect, useRef } = React;
+
+const CATEGORY_COLORS = {
+  "Binnenland": "#2563eb",
+  "Buitenland": "#dc2626",
+  "Politiek": "#7c3aed",
+  "Economie": "#059669",
+  "Rechtbankzaken": "#d97706",
+  "Rechtbank": "#d97706",
+  "Klimaat": "#0d9488",
+  "Klimaat en duurzaamheid": "#0d9488",
+  "TK Plenair": "#7c3aed",
+  "Tweede Kamer plenair": "#7c3aed",
+  "Tweede Kamer commissies": "#9333ea",
+  "Eerste Kamer plenair": "#a855f7",
+  "Sport Algemeen": "#e11d48",
+  "Sport Highlights": "#e11d48",
+  "Voetbal Overig": "#e11d48",
+  "Eredivisie": "#e11d48",
+  "Entertainment BIN": "#ec4899",
+  "Entertainment BUI": "#ec4899",
+  "Koninklijk Huis": "#ca8a04",
+  "Royalty BIN": "#ca8a04",
+  "Kunst & Cultuur": "#8b5cf6",
+  "Brussel": "#dc2626",
+  "NAVO": "#1d4ed8",
+  "Verkiezingen": "#6d28d9",
+  "Macro-economie": "#047857",
+  "Bedrijfsresultaten": "#065f46",
+  "Raad van State": "#b45309",
+  "Uitspraken": "#92400e",
+  "Requisitoir": "#78350f",
+};
+
+function getCatColor(cat) {
+  return CATEGORY_COLORS[cat] || "#64748b";
+}
+
+function parseANPAgenda(text) {
+  if (!text || !text.includes("ANP AGENDA")) return { items: [], dates: [], meta: "" };
+
+  const lines = text.split("\n");
+  const items = [];
+  let currentDate = "";
+  let i = 0;
+  let meta = "";
+
+  while (i < lines.length && !lines[i].startsWith("## ")) {
+    meta += lines[i] + "\n";
+    i++;
+  }
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (line.startsWith("## ")) {
+      currentDate = line.replace("## ", "").trim();
+      i++;
+      continue;
+    }
+
+    const match = line.match(/^(\d{2}:\d{2})\s*\|\s*(.+?)\s*\[([^\]]+)\]\s*$/);
+    const matchNoTime = !match && line.match(/^(.+?)\s*\[([^\]]+)\]\s*$/);
+
+    if (match || matchNoTime) {
+      const time = match ? match[1] : "";
+      const title = match ? match[2].trim() : matchNoTime[1].trim();
+      const cats = (match ? match[3] : matchNoTime[2]).split(",").map(c => c.trim());
+
+      let intro = "";
+      while (i + 1 < lines.length && lines[i + 1].startsWith("  ") && !lines[i + 1].match(/^\d{2}:\d{2}\s*\|/) && !lines[i + 1].startsWith("## ")) {
+        intro += (intro ? " " : "") + lines[i + 1].trim();
+        i++;
+      }
+
+      items.push({
+        id: items.length,
+        date: currentDate,
+        time,
+        title,
+        cats,
+        intro,
+        starred: false,
+      });
+    }
+    i++;
+  }
+
+  const dutchMonths = { januari:1, februari:2, maart:3, april:4, mei:5, juni:6, juli:7, augustus:8, september:9, oktober:10, november:11, december:12 };
+  function dateSortKey(d) {
+    const m = d.match(/(\d+)\s+(\w+)/);
+    if (!m) return 99999;
+    return (dutchMonths[m[2].toLowerCase()] || 0) * 100 + parseInt(m[1], 10);
+  }
+  const dates = [...new Set(items.map(it => it.date))].sort((a, b) => dateSortKey(a) - dateSortKey(b));
+  return { items, dates, meta: meta.trim() };
+}
+
+// Toast component
+function Toast({ message, onDone }) {
+  const [hiding, setHiding] = useState(false);
+  useEffect(() => {
+    const t1 = setTimeout(() => setHiding(true), 1800);
+    const t2 = setTimeout(onDone, 2100);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [onDone]);
+  return <div className={`toast ${hiding ? "hiding" : ""}`}>{message}</div>;
+}
+
+function CatBadge({ cat }) {
+  return (
+    <span className="cat-badge" style={{ backgroundColor: getCatColor(cat) }}>
+      {cat}
+    </span>
+  );
+}
+
+function AgendaItem({ item, onToggleStar }) {
+  const [expanded, setExpanded] = useState(false);
+  const TRUNCATE_LEN = 120;
+  const introIsLong = item.intro && item.intro.length > TRUNCATE_LEN;
+  const displayIntro = item.intro
+    ? expanded || !introIsLong
+      ? item.intro
+      : item.intro.substring(0, TRUNCATE_LEN).replace(/\s+\S*$/, "") + "…"
+    : "";
+
+  const rowClass = `item-row${item.starred ? " starred" : ""}${expanded ? " expanded" : ""}`;
+
+  return (
+    <div className={rowClass}>
+      <button
+        className="star-btn"
+        onClick={() => onToggleStar(item.id)}
+        title={item.starred ? "Ster verwijderen" : "Markeer als belangrijk"}
+      >
+        {item.starred ? "★" : "☆"}
+      </button>
+      <div className={`item-time${item.time ? "" : " empty"}`}>
+        {item.time || "—"}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          className={`item-title${item.intro ? " clickable" : ""}`}
+          onClick={() => item.intro && setExpanded(!expanded)}
+        >
+          <span style={{ flex: 1 }}>{item.title}</span>
+          {item.intro && (
+            <span className={`item-arrow${expanded ? " open" : ""}`}>▶</span>
+          )}
+        </div>
+        {displayIntro && (
+          <div
+            className={`item-intro${introIsLong ? " clickable" : ""}`}
+            onClick={() => introIsLong && setExpanded(!expanded)}
+            style={{ whiteSpace: expanded ? "pre-wrap" : "normal" }}
+          >
+            {displayIntro}
+            {introIsLong && !expanded && <span className="more">meer</span>}
+          </div>
+        )}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "2px" }}>
+          {item.cats.map((c, i) => <CatBadge key={i} cat={c} />)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ANPDashboard() {
+  const [rawText, setRawText] = useState("");
+  const [parsed, setParsed] = useState(null);
+  const [items, setItems] = useState([]);
+  const [activeDate, setActiveDate] = useState("");
+  const [activeCats, setActiveCats] = useState(new Set());
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showStarredOnly, setShowStarredOnly] = useState(false);
+  const [view, setView] = useState("paste");
+  const [toast, setToast] = useState(null);
+
+  const showToast = useCallback((msg) => {
+    setToast(null);
+    requestAnimationFrame(() => setToast(msg));
+  }, []);
+
+  const handleParse = useCallback(() => {
+    const result = parseANPAgenda(rawText);
+    if (result.items.length === 0) {
+      showToast("⚠ Geen items gevonden. Zorg dat de tekst begint met 'ANP AGENDA'.");
+      return;
+    }
+    setParsed(result);
+    setItems(result.items);
+    setActiveDate(result.dates[0] || "");
+    setActiveCats(new Set());
+    setView("dashboard");
+    showToast(`✓ ${result.items.length} items geladen over ${result.dates.length} dagen`);
+  }, [rawText, showToast]);
+
+  // Keyboard shortcut: Ctrl/Cmd+Enter to parse
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && view === "paste" && rawText.trim()) {
+        handleParse();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [view, rawText, handleParse]);
+
+  // Autoload via postMessage (called by bookmarklet)
+  // Bookmarklet opens this page with ?autoload=1, we tell opener we're ready,
+  // opener posts the agenda text, we parse and display it automatically.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("autoload") !== "1") return;
+
+    const handler = (event) => {
+      if (event.data && event.data.type === "ANP_AGENDA_DATA" && typeof event.data.text === "string") {
+        const text = event.data.text;
+        const result = parseANPAgenda(text);
+        if (result.items.length > 0) {
+          setRawText(text);
+          setParsed(result);
+          setItems(result.items);
+          setActiveDate(result.dates[0] || "");
+          setActiveCats(new Set());
+          setView("dashboard");
+          setToast(`✓ ${result.items.length} items automatisch geladen`);
+        } else {
+          setToast("⚠ Geen items in ontvangen data");
+        }
+      }
+    };
+    window.addEventListener("message", handler);
+
+    // Tell the bookmarklet (opener) we're ready to receive data
+    if (window.opener) {
+      // Send multiple times in case opener wasn't ready yet
+      const sendReady = () => window.opener.postMessage({ type: "ANP_DASHBOARD_READY" }, "*");
+      sendReady();
+      setTimeout(sendReady, 100);
+      setTimeout(sendReady, 500);
+    }
+
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
+  const allCats = useMemo(() => {
+    if (!items.length) return [];
+    const catSet = new Set();
+    items.forEach(it => it.cats.forEach(c => catSet.add(c)));
+    return [...catSet].sort();
+  }, [items]);
+
+  const filteredItems = useMemo(() => {
+    return items.filter(it => {
+      if (activeDate && it.date !== activeDate) return false;
+      if (activeCats.size > 0 && !it.cats.some(c => activeCats.has(c))) return false;
+      if (showStarredOnly && !it.starred) return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        return it.title.toLowerCase().includes(q) || it.intro.toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [items, activeDate, activeCats, searchQuery, showStarredOnly]);
+
+  const toggleStar = useCallback((id) => {
+    setItems(prev => prev.map(it => it.id === id ? { ...it, starred: !it.starred } : it));
+  }, []);
+
+  const toggleCat = useCallback((cat) => {
+    setActiveCats(prev => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  }, []);
+
+  const starredItems = useMemo(() => items.filter(it => it.starred), [items]);
+
+  const copyStarred = useCallback(() => {
+    if (starredItems.length === 0) {
+      showToast("Geen items gemarkeerd");
+      return;
+    }
+    const text = starredItems
+      .map(it => `${it.time ? it.time + " | " : ""}${it.title} [${it.cats.join(", ")}]${it.intro ? "\n  " + it.intro : ""}`)
+      .join("\n\n");
+    navigator.clipboard.writeText("GESELECTEERDE ANP ITEMS:\n\n" + text);
+    showToast(`★ ${starredItems.length} items gekopieerd`);
+  }, [starredItems, showToast]);
+
+  const copyAll = useCallback(() => {
+    navigator.clipboard.writeText(rawText);
+    showToast("Volledige agenda gekopieerd");
+  }, [rawText, showToast]);
+
+  // Paste view
+  if (view === "paste") {
+    return (
+      <div className="paste-view">
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div className="paste-label">NRC Nieuwsmanager</div>
+          <h1 className="paste-title">ANP Agenda Dashboard</h1>
+          <p className="paste-sub">Plak de output van de bookmarklet hieronder</p>
+        </div>
+        <textarea
+          className="paste-textarea"
+          value={rawText}
+          onChange={e => setRawText(e.target.value)}
+          placeholder={"ANP AGENDA (opgehaald ...)\nPeriode: ...\n==================================================\n\n## dinsdag 3 maart\n\n00:00 | Voorbeeld item [Binnenland]\n  Beschrijving..."}
+          autoFocus
+        />
+        <button
+          className={`paste-btn${rawText.trim() ? " active" : ""}`}
+          onClick={handleParse}
+          disabled={!rawText.trim()}
+        >
+          Analyseer agenda →
+        </button>
+        <div style={{ marginTop: 12, fontSize: 11, color: "#475569" }}>
+          ⌘/Ctrl + Enter
+        </div>
+        {toast && <Toast message={toast} onDone={() => setToast(null)} />}
+      </div>
+    );
+  }
+
+  // Dashboard view
+  const dateItems = parsed?.dates || [];
+
+  return (
+    <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc" }}>
+      {/* Header */}
+      <div className="dash-header">
+        <div>
+          <div className="dash-header-label">ANP Dashboard</div>
+          <div className="dash-header-title">
+            {items.length} items · {dateItems.length} dagen
+          </div>
+        </div>
+        <div className="header-buttons" style={{ display: "flex", gap: 8 }}>
+          <button className="header-btn" onClick={copyAll}>Kopieer alles</button>
+          <button className="header-btn star" onClick={copyStarred}>
+            ★ Kopieer selectie ({starredItems.length})
+          </button>
+          <button className="header-btn" onClick={() => setView("paste")}>Nieuwe agenda</button>
+        </div>
+      </div>
+
+      <div className="dash-layout">
+        {/* Sidebar */}
+        <div className="sidebar">
+          <input
+            type="text"
+            className="sidebar-search"
+            placeholder="Zoek..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+
+          <div className="sidebar-heading">Datum</div>
+          {dateItems.map(d => (
+            <button
+              key={d}
+              className={`sidebar-btn${activeDate === d ? " active" : ""}`}
+              onClick={() => setActiveDate(activeDate === d ? "" : d)}
+            >
+              {d}
+              <span className="sidebar-count">
+                {items.filter(it => it.date === d).length}
+              </span>
+            </button>
+          ))}
+
+          <div className="sidebar-heading" style={{ marginTop: 16 }}>Filter</div>
+          <button
+            className={`sidebar-btn${showStarredOnly ? " starred-active" : ""}`}
+            onClick={() => setShowStarredOnly(!showStarredOnly)}
+          >
+            ★ Alleen gemarkeerd
+          </button>
+
+          <div className="sidebar-heading" style={{ marginTop: 8 }}>Categorie</div>
+          <div style={{ maxHeight: 400, overflowY: "auto" }}>
+            {allCats.map(cat => {
+              const isActive = activeCats.has(cat);
+              const count = items.filter(it => it.cats.includes(cat) && (!activeDate || it.date === activeDate)).length;
+              return (
+                <button
+                  key={cat}
+                  className={`cat-btn${isActive ? " active" : ""}`}
+                  onClick={() => toggleCat(cat)}
+                >
+                  <span
+                    className="cat-dot"
+                    style={{
+                      backgroundColor: getCatColor(cat),
+                      opacity: isActive ? 1 : 0.5,
+                    }}
+                  />
+                  <span className="cat-name">{cat}</span>
+                  <span className="cat-count">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {activeCats.size > 0 && (
+            <button className="clear-btn" onClick={() => setActiveCats(new Set())}>
+              Wis filters
+            </button>
+          )}
+        </div>
+
+        {/* Main content */}
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          <div className="status-bar">
+            <strong>{filteredItems.length}</strong> items
+            {activeDate && <span> · {activeDate}</span>}
+            {activeCats.size > 0 && <span> · {activeCats.size} categorie(ën)</span>}
+            {searchQuery && <span> · zoek: "{searchQuery}"</span>}
+          </div>
+
+          <div>
+            {filteredItems.length === 0 ? (
+              <div className="empty-state">Geen items gevonden met deze filters</div>
+            ) : (
+              filteredItems.map(item => (
+                <AgendaItem key={item.id} item={item} onToggleStar={toggleStar} />
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<ANPDashboard />);
+</script>
+</body>
+</html>
