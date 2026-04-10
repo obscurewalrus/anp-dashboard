@@ -17,7 +17,7 @@
     padding: 40px 20px;
   }
   .card {
-    max-width: 560px;
+    max-width: 580px;
     width: 100%;
     background: #1e293b;
     border-radius: 12px;
@@ -41,8 +41,42 @@
   .subtitle {
     color: #94a3b8;
     font-size: 14px;
-    margin-bottom: 32px;
+    margin-bottom: 28px;
     line-height: 1.5;
+  }
+  .config {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 24px;
+  }
+  .config-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #94a3b8;
+    margin-bottom: 8px;
+    display: block;
+  }
+  .config input {
+    width: 100%;
+    padding: 10px 12px;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    color: #e2e8f0;
+    font-size: 13px;
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .config input:focus { border-color: #3b82f6; }
+  .config-hint {
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 6px;
   }
   .bookmarklet-link {
     display: inline-block;
@@ -56,18 +90,25 @@
     cursor: grab;
     transition: all 0.15s;
     border: 2px solid #3b82f6;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
   }
   .bookmarklet-link:hover {
     background: #1d4ed8;
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
   }
+  .bookmarklet-link.disabled {
+    background: #334155;
+    border-color: #475569;
+    cursor: not-allowed;
+    pointer-events: none;
+    opacity: 0.5;
+  }
   .bookmarklet-link:active { cursor: grabbing; }
   .hint {
     font-size: 12px;
     color: #64748b;
-    margin-bottom: 32px;
+    margin-bottom: 28px;
   }
   .steps {
     border-top: 1px solid #334155;
@@ -84,7 +125,7 @@
   .step {
     display: flex;
     gap: 12px;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
     align-items: flex-start;
   }
   .step-num {
@@ -128,12 +169,11 @@
   <div class="label">NRC Nieuwsmanager</div>
   <h1>📋 ANP Agenda Bookmarklet</h1>
   <p class="subtitle">
-    Haalt de volledige ANP-nieuwsagenda op en kopieert deze naar je klembord.
+    Haalt de volledige ANP-nieuwsagenda op en opent het dashboard direct met de data.
     Werkt op <code>app.anp.nl</code> (ingelogd).
   </p>
 
-  <!-- ⬇️ BOOKMARKLET LINK — dit is de minified versie van anp-bookmarklet.js -->
-  <a class="bookmarklet-link" href="javascript:(function()%7Bvar%20base%3D%22https%3A%2F%2Fnewsapi.anp.nl%2Fservices%2F%22%3Bvar%20hdrs%3D%7B%22api-version%22%3A%221.0%22%2C%22appid%22%3A%22INZAGEWEB25%22%7D%3Bvar%20d%3Dnew%20Date()%3Bvar%20ds%3Dd.toISOString().split(%22T%22)%5B0%5D%3Bfetch(base%2B%22calendars%22%2C%7Bheaders%3Ahdrs%2Ccredentials%3A%22include%22%7D).then(function(r)%7Breturn%20r.json()%7D).then(function(cj)%7B%20%20if(cj.hasError%7C%7C!cj.data)%7Balert(%22Fout%20bij%20ophalen%20kalenders%22)%3Breturn%3B%7D%20%20var%20cals%3Dcj.data.filter(function(c)%7Breturn%2F%5E%5Cd%2B%24%2F.test(c.id)%3B%7D)%3B%20%20var%20calMap%3D%7B%7D%3Bcals.forEach(function(c)%7BcalMap%5Bc.id%5D%3Dc.name%3B%7D)%3B%20%20var%20total%3Dcals.length%3B%20%20var%20ps%3Dcals.map(function(c)%7B%20%20%20%20var%20url%3Dbase%2B%22calendars%2F%22%2Bc.id%2B%22%2Fitems%3Fexpand%3Dlist%26count%3D200%26fromDate%3D%22%2Bds%2B%22%26numDays%3D3%22%3B%20%20%20%20return%20fetch(url%2C%7Bheaders%3Ahdrs%2Ccredentials%3A%22include%22%7D).then(function(r)%7Breturn%20r.json()%7D).then(function(j)%7B%20%20%20%20%20%20return%7Bcat%3Ac.name%2Citems%3A(j.data%26%26j.data.items)%7C%7C%5B%5D%7D%3B%20%20%20%20%7D).catch(function()%7Breturn%7Bcat%3Ac.name%2Citems%3A%5B%5D%7D%3B%7D)%3B%20%20%7D)%3B%20%20Promise.all(ps).then(function(results)%7B%20%20%20%20var%20seen%3D%7B%7D%3Bvar%20all%3D%5B%5D%3B%20%20%20%20results.forEach(function(r)%7B%20%20%20%20%20%20r.items.forEach(function(it)%7B%20%20%20%20%20%20%20%20var%20id%3Dit.id%3B%20%20%20%20%20%20%20%20if(!seen%5Bid%5D)%7B%20%20%20%20%20%20%20%20%20%20seen%5Bid%5D%3Dtrue%3B%20%20%20%20%20%20%20%20%20%20var%20st%3Dit.eventStart%3Fnew%20Date(it.eventStart)%3Anull%3B%20%20%20%20%20%20%20%20%20%20all.push(%7B%20%20%20%20%20%20%20%20%20%20%20%20title%3Ait.title%7C%7C%22Zonder%20titel%22%2C%20%20%20%20%20%20%20%20%20%20%20%20intro%3Ait.introText%7C%7C%22%22%2C%20%20%20%20%20%20%20%20%20%20%20%20start%3Ast%2C%20%20%20%20%20%20%20%20%20%20%20%20date%3Ast%3Fst.toLocaleDateString(%22nl-NL%22%2C%7Bweekday%3A%22long%22%2Cday%3A%22numeric%22%2Cmonth%3A%22long%22%7D)%3A%22Geen%20datum%22%2C%20%20%20%20%20%20%20%20%20%20%20%20time%3Ast%3Fst.toLocaleTimeString(%22nl-NL%22%2C%7Bhour%3A%222-digit%22%2Cminute%3A%222-digit%22%7D)%3A%22%22%2C%20%20%20%20%20%20%20%20%20%20%20%20cats%3A%5Br.cat%5D%2C%20%20%20%20%20%20%20%20%20%20%20%20products%3A(it.plannedProducts%7C%7C%5B%5D).join(%22%2C%20%22)%2C%20%20%20%20%20%20%20%20%20%20%20%20words%3Ait.wordCount%7C%7C0%20%20%20%20%20%20%20%20%20%20%7D)%3B%20%20%20%20%20%20%20%20%7Delse%7B%20%20%20%20%20%20%20%20%20%20for(var%20i%3D0%3Bi%3Call.length%3Bi%2B%2B)%7Bif(all%5Bi%5D.title%3D%3D%3Dit.title)%7Bif(all%5Bi%5D.cats.indexOf(r.cat)%3D%3D%3D-1)all%5Bi%5D.cats.push(r.cat)%3Bbreak%3B%7D%7D%20%20%20%20%20%20%20%20%7D%20%20%20%20%20%20%7D)%3B%20%20%20%20%7D)%3B%20%20%20%20var%20dates%3D%7B%7D%3Bvar%20dateOrder%3D%5B%5D%3B%20%20%20%20all.forEach(function(a)%7B%20%20%20%20%20%20if(!dates%5Ba.date%5D)%7Bdates%5Ba.date%5D%3D%5B%5D%3BdateOrder.push(a.date)%3B%7D%20%20%20%20%20%20dates%5Ba.date%5D.push(a)%3B%20%20%20%20%7D)%3B%20%20%20%20Object.keys(dates).forEach(function(k)%7B%20%20%20%20%20%20dates%5Bk%5D.sort(function(a%2Cb)%7B%20%20%20%20%20%20%20%20if(!a.start)return%201%3Bif(!b.start)return%20-1%3Breturn%20a.start-b.start%3B%20%20%20%20%20%20%7D)%3B%20%20%20%20%7D)%3B%20%20%20%20var%20s%3D%22ANP%20AGENDA%20(opgehaald%20%22%2Bd.toLocaleString(%22nl-NL%22)%2B%22)%5Cn%22%3B%20%20%20%20s%2B%3D%22Periode%3A%20%22%2Bds%2B%22%20%2B%202%20dagen%20%7C%20Kalenders%3A%20%22%2Btotal%2B%22%20%7C%20Items%3A%20%22%2Ball.length%2B%22%5Cn%22%3B%20%20%20%20s%2B%3D%22%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%5Cn%5Cn%22%3B%20%20%20%20dateOrder.forEach(function(dt)%7B%20%20%20%20%20%20s%2B%3D%22%23%23%20%22%2Bdt%2B%22%5Cn%5Cn%22%3B%20%20%20%20%20%20dates%5Bdt%5D.forEach(function(it)%7B%20%20%20%20%20%20%20%20if(it.time)s%2B%3Dit.time%2B%22%20%7C%20%22%3B%20%20%20%20%20%20%20%20s%2B%3Dit.title%3B%20%20%20%20%20%20%20%20s%2B%3D%22%20%5B%22%2Bit.cats.join(%22%2C%20%22)%2B%22%5D%22%3B%20%20%20%20%20%20%20%20s%2B%3D%22%5Cn%22%3B%20%20%20%20%20%20%20%20if(it.intro)%7Bvar%20txt%3Dit.intro%3Bs%2B%3D%22%20%20%22%2Btxt%2B%22%5Cn%22%3B%7D%20%20%20%20%20%20%20%20s%2B%3D%22%5Cn%22%3B%20%20%20%20%20%20%7D)%3B%20%20%20%20%7D)%3B%20%20%20%20navigator.clipboard.writeText(s).then(function()%7B%20%20%20%20%20%20alert(%22ANP%20agenda%20gekopieerd!%5Cn%22%2Ball.length%2B%22%20items%20uit%20%22%2Btotal%2B%22%20kalenders.%22)%3B%20%20%20%20%7D).catch(function()%7B%20%20%20%20%20%20var%20ta%3Ddocument.createElement(%22textarea%22)%3Bta.value%3Ds%3Bdocument.body.appendChild(ta)%3Bta.select()%3Bdocument.execCommand(%22copy%22)%3Bdocument.body.removeChild(ta)%3B%20%20%20%20%20%20alert(%22ANP%20agenda%20gekopieerd!%5Cn%22%2Ball.length%2B%22%20items%20uit%20%22%2Btotal%2B%22%20kalenders.%22)%3B%20%20%20%20%7D)%3B%20%20%7D).catch(function(e)%7Balert(%22Fout%20bij%20items%3A%20%22%2Be.message)%3B%7D)%3B%7D).catch(function(e)%7Balert(%22Fout%20bij%20kalenders%3A%20%22%2Be.message)%3B%7D)%3B%7D)()">
+  <a id="bookmarkletLink" class="bookmarklet-link" href="#">
     📋 ANP Agenda Ophalen
   </a>
   <div class="hint">← Sleep deze knop naar je bladwijzerbalk</div>
@@ -142,7 +182,7 @@
     <h2>Installatie</h2>
     <div class="step">
       <div class="step-num">1</div>
-      <div class="step-text">Sleep de blauwe knop hierboven naar je <strong>bladwijzerbalk</strong> (bookmarks bar).</div>
+      <div class="step-text">Sleep de blauwe knop naar je <strong>bladwijzerbalk</strong>.</div>
     </div>
     <div class="step">
       <div class="step-num">2</div>
@@ -150,25 +190,21 @@
     </div>
     <div class="step">
       <div class="step-num">3</div>
-      <div class="step-text">Klik op de bookmarklet in je bladwijzerbalk.</div>
-    </div>
-    <div class="step">
-      <div class="step-num">4</div>
-      <div class="step-text">De agenda wordt automatisch gekopieerd naar je klembord. Plak in het <strong>ANP Dashboard</strong>.</div>
+      <div class="step-text">Klik op de bookmarklet — het dashboard opent automatisch met de agenda erin.</div>
     </div>
 
-    <h2 style="margin-top: 24px;">Technische details</h2>
+    <h2 style="margin-top: 24px;">Hoe werkt het?</h2>
     <div class="step">
       <div class="step-num">•</div>
-      <div class="step-text">Haalt items op van alle ANP-kalenders (vandaag + 2 dagen)</div>
+      <div class="step-text">De bookmarklet haalt items van alle ANP-kalenders (vandaag + 2 dagen)</div>
     </div>
     <div class="step">
       <div class="step-num">•</div>
-      <div class="step-text">Dedupliceert items die in meerdere kalenders staan</div>
+      <div class="step-text">Stuurt de data via <code>postMessage</code> naar het dashboard in een nieuw tabblad</div>
     </div>
     <div class="step">
       <div class="step-num">•</div>
-      <div class="step-text">Vereist actieve sessie op <code>app.anp.nl</code></div>
+      <div class="step-text">Bij geblokkeerde popups: fallback naar klembord</div>
     </div>
     <div class="step">
       <div class="step-num">•</div>
@@ -177,9 +213,37 @@
   </div>
 
   <div class="version">
-    ANP Nieuwstools v2 — NRC Nieuwsmanager
+    ANP Nieuwstools v3 — NRC Nieuwsmanager
   </div>
 </div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// ⚙️  CONFIGUREER HIER ÉÉN KEER DE URL VAN JE DASHBOARD
+// ═══════════════════════════════════════════════════════════════════
+// Dit is de URL waar anp-dashboard.html staat. Pas dit aan vóór je
+// naar GitHub pusht. Daarna kun je deze pagina delen met collega's —
+// zij hoeven niets te configureren.
+//
+// Voorbeeld: "https://lucasbrouwers.github.io/anp-nieuwstools/anp-dashboard.html"
+const DASHBOARD_URL = https://obscurewalrus.github.io/anp-dashboard/anp-dashboard.html";
+// ═══════════════════════════════════════════════════════════════════
+
+// Bookmarklet template — __DASHBOARD_URL__ wordt hieronder vervangen.
+const BOOKMARKLET_CODE = `(function(){var DASHBOARD_URL="__DASHBOARD_URL__";var base="https://newsapi.anp.nl/services/";var hdrs={"api-version":"1.0","appid":"INZAGEWEB25"};var d=new Date();var ds=d.toISOString().split("T")[0];fetch(base+"calendars",{headers:hdrs,credentials:"include"}).then(function(r){return r.json()}).then(function(cj){if(cj.hasError||!cj.data){alert("Fout bij ophalen kalenders");return;}var cals=cj.data.filter(function(c){return /^\\d+$/.test(c.id);});var total=cals.length;var ps=cals.map(function(c){var url=base+"calendars/"+c.id+"/items?expand=list&count=200&fromDate="+ds+"&numDays=3";return fetch(url,{headers:hdrs,credentials:"include"}).then(function(r){return r.json()}).then(function(j){return{cat:c.name,items:(j.data&&j.data.items)||[]};}).catch(function(){return{cat:c.name,items:[]};});});Promise.all(ps).then(function(results){var seen={};var all=[];results.forEach(function(r){r.items.forEach(function(it){var id=it.id;if(!seen[id]){seen[id]=true;var st=it.eventStart?new Date(it.eventStart):null;all.push({title:it.title||"Zonder titel",intro:it.introText||"",start:st,date:st?st.toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long"}):"Geen datum",time:st?st.toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"}):"",cats:[r.cat]});}else{for(var i=0;i<all.length;i++){if(all[i].title===it.title){if(all[i].cats.indexOf(r.cat)===-1)all[i].cats.push(r.cat);break;}}}});});var dates={};var dateOrder=[];all.forEach(function(a){if(!dates[a.date]){dates[a.date]=[];dateOrder.push(a.date);}dates[a.date].push(a);});Object.keys(dates).forEach(function(k){dates[k].sort(function(a,b){if(!a.start)return 1;if(!b.start)return -1;return a.start-b.start;});});var s="ANP AGENDA (opgehaald "+d.toLocaleString("nl-NL")+")\\n";s+="Periode: "+ds+" + 2 dagen | Kalenders: "+total+" | Items: "+all.length+"\\n";s+="==================================================\\n\\n";dateOrder.forEach(function(dt){s+="## "+dt+"\\n\\n";dates[dt].forEach(function(it){if(it.time)s+=it.time+" | ";s+=it.title;s+=" ["+it.cats.join(", ")+"]";s+="\\n";if(it.intro)s+="  "+it.intro+"\\n";s+="\\n";});});var dataSent=false;var ml=function(ev){if(!dataSent&&ev.data&&ev.data.type==="ANP_DASHBOARD_READY"&&ev.source){ev.source.postMessage({type:"ANP_AGENDA_DATA",text:s},"*");dataSent=true;window.removeEventListener("message",ml);}};window.addEventListener("message",ml);var dw=window.open(DASHBOARD_URL+"?autoload=1","_blank");if(!dw){window.removeEventListener("message",ml);navigator.clipboard.writeText(s).then(function(){alert("Popup geblokkeerd. "+all.length+" items naar klembord. Plak handmatig.");}).catch(function(){alert("Popup geblokkeerd. Sta popups toe voor app.anp.nl.");});return;}setTimeout(function(){if(!dataSent){window.removeEventListener("message",ml);navigator.clipboard.writeText(s).catch(function(){});}},30000);}).catch(function(e){alert("Fout bij items: "+e.message);});}).catch(function(e){alert("Fout bij kalenders: "+e.message);});})()`;
+
+const bookmarkletLink = document.getElementById("bookmarkletLink");
+const code = BOOKMARKLET_CODE.replace("__DASHBOARD_URL__", DASHBOARD_URL);
+bookmarkletLink.href = "javascript:" + encodeURIComponent(code);
+
+// Waarschuw als de URL nog niet is aangepast
+if (DASHBOARD_URL.includes("USERNAME") || DASHBOARD_URL.includes("REPO")) {
+  const warning = document.createElement("div");
+  warning.style.cssText = "background:#7f1d1d;color:#fecaca;padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:13px;border:1px solid #991b1b;";
+  warning.innerHTML = "⚠ <strong>Configuratie nodig:</strong> open <code style='background:#450a0a;padding:1px 5px;border-radius:3px;'>anp-bookmarklet.html</code> en pas <code style='background:#450a0a;padding:1px 5px;border-radius:3px;'>DASHBOARD_URL</code> aan bovenaan het script.";
+  document.querySelector(".card").insertBefore(warning, document.querySelector(".steps"));
+}
+</script>
 
 </body>
 </html>
