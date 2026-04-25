@@ -408,6 +408,19 @@ function getCatColor(cat) {
   return CATEGORY_COLORS[cat] || "#64748b";
 }
 
+const DUTCH_MONTHS = { januari:1, februari:2, maart:3, april:4, mei:5, juni:6, juli:7, augustus:8, september:9, oktober:10, november:11, december:12 };
+
+function dateSortKey(d) {
+  const m = d.match(/(\d+)\s+(\w+)/);
+  if (!m) return 99999;
+  return (DUTCH_MONTHS[m[2].toLowerCase()] || 0) * 100 + parseInt(m[1], 10);
+}
+
+function todaySortKey() {
+  const now = new Date();
+  return (now.getMonth() + 1) * 100 + now.getDate();
+}
+
 function parseANPAgenda(text) {
   if (!text || !text.includes("ANP AGENDA")) return { items: [], dates: [], meta: "" };
 
@@ -458,12 +471,6 @@ function parseANPAgenda(text) {
     i++;
   }
 
-  const dutchMonths = { januari:1, februari:2, maart:3, april:4, mei:5, juni:6, juli:7, augustus:8, september:9, oktober:10, november:11, december:12 };
-  function dateSortKey(d) {
-    const m = d.match(/(\d+)\s+(\w+)/);
-    if (!m) return 99999;
-    return (dutchMonths[m[2].toLowerCase()] || 0) * 100 + parseInt(m[1], 10);
-  }
   const dates = [...new Set(items.map(it => it.date))].sort((a, b) => dateSortKey(a) - dateSortKey(b));
   return { items, dates, meta: meta.trim() };
 }
@@ -547,6 +554,7 @@ function ANPDashboard() {
   const [activeCats, setActiveCats] = useState(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [showStarredOnly, setShowStarredOnly] = useState(false);
+  const [showFromTodayOnly, setShowFromTodayOnly] = useState(true);
   const [view, setView] = useState("paste");
   const [toast, setToast] = useState(null);
 
@@ -561,9 +569,11 @@ function ANPDashboard() {
       showToast("⚠ Geen items gevonden. Zorg dat de tekst begint met 'ANP AGENDA'.");
       return;
     }
+    const todayKey = todaySortKey();
+    const firstUpcoming = result.dates.find(d => dateSortKey(d) >= todayKey);
     setParsed(result);
     setItems(result.items);
-    setActiveDate(result.dates[0] || "");
+    setActiveDate(firstUpcoming || result.dates[0] || "");
     setActiveCats(new Set());
     setView("dashboard");
     showToast(`✓ ${result.items.length} items geladen over ${result.dates.length} dagen`);
@@ -592,10 +602,12 @@ function ANPDashboard() {
         const text = event.data.text;
         const result = parseANPAgenda(text);
         if (result.items.length > 0) {
+          const todayKey = todaySortKey();
+          const firstUpcoming = result.dates.find(d => dateSortKey(d) >= todayKey);
           setRawText(text);
           setParsed(result);
           setItems(result.items);
-          setActiveDate(result.dates[0] || "");
+          setActiveDate(firstUpcoming || result.dates[0] || "");
           setActiveCats(new Set());
           setView("dashboard");
           setToast(`✓ ${result.items.length} items automatisch geladen`);
@@ -626,7 +638,9 @@ function ANPDashboard() {
   }, [items]);
 
   const filteredItems = useMemo(() => {
+    const todayKey = todaySortKey();
     return items.filter(it => {
+      if (showFromTodayOnly && dateSortKey(it.date) < todayKey) return false;
       if (activeDate && it.date !== activeDate) return false;
       if (activeCats.size > 0 && !it.cats.some(c => activeCats.has(c))) return false;
       if (showStarredOnly && !it.starred) return false;
@@ -636,7 +650,7 @@ function ANPDashboard() {
       }
       return true;
     });
-  }, [items, activeDate, activeCats, searchQuery, showStarredOnly]);
+  }, [items, activeDate, activeCats, searchQuery, showStarredOnly, showFromTodayOnly]);
 
   const toggleStar = useCallback((id) => {
     setItems(prev => prev.map(it => it.id === id ? { ...it, starred: !it.starred } : it));
@@ -702,7 +716,12 @@ function ANPDashboard() {
   }
 
   // Dashboard view
-  const dateItems = parsed?.dates || [];
+  const allDates = parsed?.dates || [];
+  const todayKey = todaySortKey();
+  const dateItems = showFromTodayOnly
+    ? allDates.filter(d => dateSortKey(d) >= todayKey)
+    : allDates;
+  const hiddenDateCount = allDates.length - dateItems.length;
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc" }}>
@@ -749,6 +768,21 @@ function ANPDashboard() {
           ))}
 
           <div className="sidebar-heading" style={{ marginTop: 16 }}>Filter</div>
+          <button
+            className={`sidebar-btn${showFromTodayOnly ? " active" : ""}`}
+            onClick={() => {
+              const next = !showFromTodayOnly;
+              setShowFromTodayOnly(next);
+              if (next && activeDate && dateSortKey(activeDate) < todaySortKey()) {
+                setActiveDate("");
+              }
+            }}
+          >
+            📅 Vanaf vandaag
+            {hiddenDateCount > 0 && showFromTodayOnly && (
+              <span className="sidebar-count">−{hiddenDateCount}</span>
+            )}
+          </button>
           <button
             className={`sidebar-btn${showStarredOnly ? " starred-active" : ""}`}
             onClick={() => setShowStarredOnly(!showStarredOnly)}
