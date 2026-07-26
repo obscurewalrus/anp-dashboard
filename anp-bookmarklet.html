@@ -194,124 +194,43 @@
       <div class="step-num">•</div>
       <div class="step-text">Bij geblokkeerde popups: fallback naar klembord</div>
     </div>
+    <div class="step">
+      <div class="step-num">•</div>
+      <div class="step-text">
+        Dagen die al voorbij zijn worden in het dashboard standaard verborgen.
+        Meerdaagse events die nog lopen schuiven mee naar vandaag.
+      </div>
+    </div>
+
+    <h2 style="margin-top: 24px;">Al een oudere versie?</h2>
+    <div class="step">
+      <div class="step-num">!</div>
+      <div class="step-text">
+        Een bookmarklet in je bladwijzerbalk werkt zichzelf niet bij.
+        Gebruik je nog v3 of ouder, <strong>verwijder die dan en sleep de knop
+        hierboven opnieuw</strong> — anders meldt het dashboard dat je
+        bookmarklet verouderd is.
+      </div>
+    </div>
   </div>
 
   <div class="version">
-    ANP Nieuwstools v3 — NRC Nieuwsmanager
+    ANP Nieuwstools v4 — NRC Nieuwsmanager
   </div>
 </div>
 
+<!-- De bookmarklet-code zelf staat in anp-bookmarklet.js en wordt daar
+     onderhouden. Deze pagina pakt hem alleen in tot een javascript:-URL.
+     Een klassieke <script src> werkt ook vanaf file://, in tegenstelling
+     tot fetch(), dus er is hier geen tweede kopie van de code nodig. -->
+<script src="anp-bookmarklet.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
-// De bookmarklet wordt hier opgebouwd. De dashboard-URL wordt
-// automatisch afgeleid uit de huidige pagina-locatie: zorg dat
-// anp-dashboard.html in dezelfde map staat als dit bestand.
+// Bouw de bookmarklet en zet de href. De dashboard-URL wordt afgeleid
+// uit de locatie van deze pagina: zorg dat anp-dashboard.html in
+// dezelfde map staat. Zo wijst een fork vanzelf naar het eigen
+// dashboard in plaats van naar dat van iemand anders.
 // ═══════════════════════════════════════════════════════════════════
-
-// De bookmarklet zelf — geschreven als gewone JS-functie. We doen
-// .toString() en wrappen in (fn)() om er een bookmarklet van te maken.
-// __DASHBOARD_URL__ is een placeholder die hieronder wordt vervangen.
-function anpBookmarklet() {
-  var DASHBOARD_URL = "__DASHBOARD_URL__";
-  var base = "https://newsapi.anp.nl/services/";
-  var hdrs = { "api-version": "1.0", "appid": "INZAGEWEB25" };
-  var d = new Date();
-  var ds = d.toISOString().split("T")[0];
-
-  fetch(base + "calendars", { headers: hdrs, credentials: "include" })
-    .then(function (r) { return r.json(); })
-    .then(function (cj) {
-      if (cj.hasError || !cj.data) { alert("Fout bij ophalen kalenders"); return; }
-      var cals = cj.data.filter(function (c) { return /^\d+$/.test(c.id); });
-      var total = cals.length;
-      var ps = cals.map(function (c) {
-        var url = base + "calendars/" + c.id + "/items?expand=list&count=200&fromDate=" + ds + "&numDays=3";
-        return fetch(url, { headers: hdrs, credentials: "include" })
-          .then(function (r) { return r.json(); })
-          .then(function (j) { return { cat: c.name, items: (j.data && j.data.items) || [] }; })
-          .catch(function () { return { cat: c.name, items: [] }; });
-      });
-      Promise.all(ps).then(function (results) {
-        var seen = {}, all = [];
-        results.forEach(function (r) {
-          r.items.forEach(function (it) {
-            var id = it.id;
-            if (!seen[id]) {
-              seen[id] = true;
-              var st = it.eventStart ? new Date(it.eventStart) : null;
-              all.push({
-                title: it.title || "Zonder titel",
-                intro: it.introText || "",
-                start: st,
-                date: st ? st.toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long" }) : "Geen datum",
-                time: st ? st.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }) : "",
-                cats: [r.cat]
-              });
-            } else {
-              for (var i = 0; i < all.length; i++) {
-                if (all[i].title === it.title) {
-                  if (all[i].cats.indexOf(r.cat) === -1) all[i].cats.push(r.cat);
-                  break;
-                }
-              }
-            }
-          });
-        });
-        var dates = {}, dateOrder = [];
-        all.forEach(function (a) {
-          if (!dates[a.date]) { dates[a.date] = []; dateOrder.push(a.date); }
-          dates[a.date].push(a);
-        });
-        Object.keys(dates).forEach(function (k) {
-          dates[k].sort(function (a, b) {
-            if (!a.start) return 1;
-            if (!b.start) return -1;
-            return a.start - b.start;
-          });
-        });
-        var s = "ANP AGENDA (opgehaald " + d.toLocaleString("nl-NL") + ")\n";
-        s += "Periode: " + ds + " + 2 dagen | Kalenders: " + total + " | Items: " + all.length + "\n";
-        s += "==================================================\n\n";
-        dateOrder.forEach(function (dt) {
-          s += "## " + dt + "\n\n";
-          dates[dt].forEach(function (it) {
-            if (it.time) s += it.time + " | ";
-            s += it.title;
-            s += " [" + it.cats.join(", ") + "]";
-            s += "\n";
-            if (it.intro) s += "  " + it.intro + "\n";
-            s += "\n";
-          });
-        });
-        // postMessage handshake naar dashboard
-        var dataSent = false;
-        var ml = function (ev) {
-          if (!dataSent && ev.data && ev.data.type === "ANP_DASHBOARD_READY" && ev.source) {
-            ev.source.postMessage({ type: "ANP_AGENDA_DATA", text: s }, "*");
-            dataSent = true;
-            window.removeEventListener("message", ml);
-          }
-        };
-        window.addEventListener("message", ml);
-        var dw = window.open(DASHBOARD_URL + "?autoload=1", "_blank");
-        if (!dw) {
-          window.removeEventListener("message", ml);
-          navigator.clipboard.writeText(s)
-            .then(function () { alert("Popup geblokkeerd. " + all.length + " items naar klembord. Plak handmatig in dashboard."); })
-            .catch(function () { alert("Popup geblokkeerd. Sta popups toe voor app.anp.nl."); });
-          return;
-        }
-        setTimeout(function () {
-          if (!dataSent) {
-            window.removeEventListener("message", ml);
-            navigator.clipboard.writeText(s).catch(function () {});
-          }
-        }, 30000);
-      }).catch(function (e) { alert("Fout bij items: " + e.message); });
-    }).catch(function (e) { alert("Fout bij kalenders: " + e.message); });
-}
-
-// ─── Bouw de bookmarklet en zet de href ────────────────────────────
 function showError(html) {
   var box = document.getElementById("errorBox");
   box.className = "error-box";
@@ -319,8 +238,14 @@ function showError(html) {
 }
 
 try {
-  // Hardcoded dashboard-URL
-  var dashboardUrl = "https://obscurewalrus.github.io/anp-dashboard/anp-dashboard.html";
+  if (typeof anpBookmarklet !== "function") {
+    throw new Error(
+      "anp-bookmarklet.js kon niet geladen worden. Zorg dat dat bestand " +
+      "naast deze pagina staat."
+    );
+  }
+
+  var dashboardUrl = new URL("anp-dashboard.html", window.location.href).href;
   document.getElementById("targetUrl").textContent = dashboardUrl;
 
   // Waarschuw als we op file:// draaien — postMessage werkt dan vaak niet
@@ -332,10 +257,22 @@ try {
     );
   }
 
-  // Bouw de bookmarklet-code
-  var fnSource = anpBookmarklet.toString();
-  var bookmarkletCode = "(" + fnSource + ")()";
-  var finalCode = bookmarkletCode.replace('"__DASHBOARD_URL__"', JSON.stringify(dashboardUrl));
+  // Bouw de bookmarklet-code: de functie als tekst, direct aangeroepen
+  // met de dashboard-URL als argument.
+  //
+  // Hele commentaarregels gaan eruit: de broncode blijft leesbaar, maar de
+  // bladwijzer-URL wordt er ruwweg drie keer korter van. Alleen regels die
+  // mét // beginnen sneuvelen, dus een "https://..." binnen een string
+  // blijft ongemoeid.
+  var body = anpBookmarklet
+    .toString()
+    .split("\n")
+    .filter(function (line) {
+      return line.trim().indexOf("//") !== 0;
+    })
+    .join("\n");
+
+  var finalCode = "(" + body + ")(" + JSON.stringify(dashboardUrl) + ")";
   var href = "javascript:" + encodeURIComponent(finalCode);
 
   var link = document.getElementById("bookmarkletLink");

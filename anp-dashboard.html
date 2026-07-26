@@ -275,6 +275,25 @@
     color: #6b7280;
   }
   .status-bar strong { color: #111827; }
+
+  /* Waarschuwing dat de geladen agenda van een eerdere dag is. */
+  .stale-banner {
+    padding: 10px 16px;
+    background: #fef3c7;
+    border-bottom: 1px solid #fcd34d;
+    color: #78350f;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .fetch-stamp {
+    margin-left: 10px;
+    font-size: 11px;
+    font-weight: 400;
+    color: #94a3b8;
+  }
+  /* Voorbije dagen zijn alleen zichtbaar via de toggle; gedimd zodat je
+     ziet dat je naar het verleden kijkt. */
+  .sidebar-btn.past { color: #9ca3af; font-style: italic; }
   .item-row {
     display: flex;
     gap: 10px;
@@ -370,7 +389,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useMemo, useCallback, useEffect, useRef } = React;
+const { useState, useMemo, useCallback, useEffect } = React;
 
 const CATEGORY_COLORS = {
   "Binnenland": "#2563eb",
@@ -408,12 +427,54 @@ function getCatColor(cat) {
   return CATEGORY_COLORS[cat] || "#64748b";
 }
 
+// Alle datumlogica draait op Europe/Amsterdam, niet op de zone van de
+// browser. Een item van 00:30 hoort anders zomaar bij de vorige dag.
+const TZ = "Europe/Amsterdam";
+
+// en-CA levert YYYY-MM-DD, hetzelfde formaat als de ISO-sleutels in de
+// bookmarklet-output. Zo is vergelijken een gewone stringvergelijking.
+function todayIso() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(new Date());
+}
+
+function nowClock() {
+  return new Intl.DateTimeFormat("nl-NL", {
+    timeZone: TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+}
+
+function isoShift(iso, days) {
+  const p = iso.split("-");
+  const d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().split("T")[0];
+}
+
+const EMPTY_PARSE = {
+  items: [],
+  dates: [],
+  meta: "",
+  fetchedIso: null,
+  fetchedTime: "",
+  outdated: false,
+};
+
 function parseANPAgenda(text) {
-  if (!text || !text.includes("ANP AGENDA")) return { items: [], dates: [], meta: "" };
+  if (!text || !text.includes("ANP AGENDA")) return { ...EMPTY_PARSE };
+
+  // Vanaf v4 draagt elke datumkop een ISO-sleutel. Zonder die sleutel valt
+  // niet betrouwbaar te bepalen welke dag "vandaag" is — dan is een
+  // duidelijke melding beter dan stilzwijgend de verkeerde dag tonen.
+  if (!/^ANP AGENDA v4\b/m.test(text)) {
+    return { ...EMPTY_PARSE, outdated: true };
+  }
 
   const lines = text.split("\n");
   const items = [];
   let currentDate = "";
+  let currentIso = "";
   let i = 0;
   let meta = "";
 
@@ -422,11 +483,21 @@ function parseANPAgenda(text) {
     i++;
   }
 
+  const fetchStamp = meta.match(/\[fetch=(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})\]/);
+
   while (i < lines.length) {
     const line = lines[i];
 
     if (line.startsWith("## ")) {
-      currentDate = line.replace("## ", "").trim();
+      let label = line.replace("## ", "").trim();
+      const iso = label.match(/\s*\[(\d{4}-\d{2}-\d{2})\]$/);
+      if (iso) {
+        currentIso = iso[1];
+        label = label.slice(0, iso.index).trim();
+      } else {
+        currentIso = "";
+      }
+      currentDate = label;
       i++;
       continue;
     }
@@ -447,6 +518,10 @@ function parseANPAgenda(text) {
 
       items.push({
         id: items.length,
+        // Stabiele identiteit voor opgeslagen sterren: de index verschuift
+        // bij elke nieuwe agenda, deze sleutel niet.
+        key: `${currentIso}|${time}|${title}`,
+        iso: currentIso,
         date: currentDate,
         time,
         title,
@@ -458,15 +533,63 @@ function parseANPAgenda(text) {
     i++;
   }
 
-  const dutchMonths = { januari:1, februari:2, maart:3, april:4, mei:5, juni:6, juli:7, augustus:8, september:9, oktober:10, november:11, december:12 };
-  function dateSortKey(d) {
-    const m = d.match(/(\d+)\s+(\w+)/);
-    if (!m) return 99999;
-    return (dutchMonths[m[2].toLowerCase()] || 0) * 100 + parseInt(m[1], 10);
-  }
-  const dates = [...new Set(items.map(it => it.date))].sort((a, b) => dateSortKey(a) - dateSortKey(b));
-  return { items, dates, meta: meta.trim() };
+  // Sorteren op ISO-sleutel: lexicografisch gelijk aan chronologisch, dus
+  // ook rond de jaarwisseling klopt de volgorde. Items zonder datum achteraan.
+  const byIso = new Map();
+  items.forEach(it => {
+    if (!byIso.has(it.iso)) byIso.set(it.iso, { iso: it.iso, label: it.date });
+  });
+  const dates = [...byIso.values()].sort((a, b) => {
+    if (!a.iso) return 1;
+    if (!b.iso) return -1;
+    return a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0;
+  });
+
+  return {
+    items,
+    dates,
+    meta: meta.trim(),
+    fetchedIso: fetchStamp ? fetchStamp[1] : null,
+    fetchedTime: fetchStamp ? fetchStamp[2] : "",
+    outdated: false,
+  };
 }
+
+// Sterren overleven een reload. Opgeslagen op itemsleutel (datum|tijd|titel)
+// in plaats van op arrayindex, want die verschuift bij elke nieuwe agenda.
+const STAR_STORAGE_KEY = "anp:starred";
+
+function loadStars() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STAR_STORAGE_KEY) || "[]");
+    if (!Array.isArray(raw)) return new Set();
+    // Opruimen: alles ouder dan een week is toch niet meer op te halen.
+    const cutoff = isoShift(todayIso(), -7);
+    return new Set(raw.filter(k => typeof k === "string" && k.slice(0, 10) >= cutoff));
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function saveStars(keys) {
+  try {
+    localStorage.setItem(STAR_STORAGE_KEY, JSON.stringify([...keys]));
+  } catch (e) {
+    // Privémodus of vol quotum — sterren werken dan alleen deze sessie.
+  }
+}
+
+// Standaard opent het dashboard op vandaag. Ontbreekt vandaag in de agenda,
+// dan de eerstvolgende dag die nog moet komen — nooit zomaar de vroegste dag,
+// want dat is precies hoe gisteren in beeld bleef.
+function pickDefaultIso(dates) {
+  const t = todayIso();
+  const upcoming = dates.filter(d => d.iso && d.iso >= t);
+  return (upcoming.find(d => d.iso === t) || upcoming[0] || {}).iso || "";
+}
+
+const OUTDATED_MSG =
+  "⚠ Deze agenda komt van een oude bookmarklet. Sleep de knop opnieuw vanaf anp-bookmarklet.html.";
 
 // Toast component
 function Toast({ message, onDone }) {
@@ -543,10 +666,12 @@ function ANPDashboard() {
   const [rawText, setRawText] = useState("");
   const [parsed, setParsed] = useState(null);
   const [items, setItems] = useState([]);
-  const [activeDate, setActiveDate] = useState("");
+  const [activeIso, setActiveIso] = useState("");
   const [activeCats, setActiveCats] = useState(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [showStarredOnly, setShowStarredOnly] = useState(false);
+  const [showPast, setShowPast] = useState(false);
+  const [upcomingOnly, setUpcomingOnly] = useState(false);
   const [view, setView] = useState("paste");
   const [toast, setToast] = useState(null);
 
@@ -555,19 +680,37 @@ function ANPDashboard() {
     requestAnimationFrame(() => setToast(msg));
   }, []);
 
+  // Gedeeld door plakken en autoload, zodat beide paden dezelfde
+  // standaardtab, sterren en filters krijgen.
+  const applyResult = useCallback((text, result, message) => {
+    const stars = loadStars();
+    setRawText(text);
+    setParsed(result);
+    setItems(result.items.map(it => ({ ...it, starred: stars.has(it.key) })));
+    setActiveIso(pickDefaultIso(result.dates));
+    setActiveCats(new Set());
+    setShowPast(false);
+    setUpcomingOnly(false);
+    setView("dashboard");
+    setToast(message);
+  }, []);
+
   const handleParse = useCallback(() => {
     const result = parseANPAgenda(rawText);
+    if (result.outdated) {
+      showToast(OUTDATED_MSG);
+      return;
+    }
     if (result.items.length === 0) {
       showToast("⚠ Geen items gevonden. Zorg dat de tekst begint met 'ANP AGENDA'.");
       return;
     }
-    setParsed(result);
-    setItems(result.items);
-    setActiveDate(result.dates[0] || "");
-    setActiveCats(new Set());
-    setView("dashboard");
-    showToast(`✓ ${result.items.length} items geladen over ${result.dates.length} dagen`);
-  }, [rawText, showToast]);
+    applyResult(
+      rawText,
+      result,
+      `✓ ${result.items.length} items geladen over ${result.dates.length} dagen`
+    );
+  }, [rawText, showToast, applyResult]);
 
   // Keyboard shortcut: Ctrl/Cmd+Enter to parse
   useEffect(() => {
@@ -586,37 +729,60 @@ function ANPDashboard() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("autoload") !== "1") return;
+    const token = params.get("t");
+
+    // Alleen de bookmarklet, draaiend op app.anp.nl, mag een agenda
+    // aanleveren. Zonder deze controle kan elke pagina die dit dashboard
+    // opent verzonnen items injecteren — op een nieuwsredactie is dat geen
+    // theoretisch risico. Draait een collega ANP op een ander domein, dan
+    // hoort die origin hier toegevoegd te worden.
+    const ALLOWED_ORIGINS = ["https://app.anp.nl"];
 
     const handler = (event) => {
-      if (event.data && event.data.type === "ANP_AGENDA_DATA" && typeof event.data.text === "string") {
-        const text = event.data.text;
-        const result = parseANPAgenda(text);
-        if (result.items.length > 0) {
-          setRawText(text);
-          setParsed(result);
-          setItems(result.items);
-          setActiveDate(result.dates[0] || "");
-          setActiveCats(new Set());
-          setView("dashboard");
-          setToast(`✓ ${result.items.length} items automatisch geladen`);
-        } else {
-          setToast("⚠ Geen items in ontvangen data");
-        }
+      if (!event.data || event.data.type !== "ANP_AGENDA_DATA") return;
+      if (event.source !== window.opener) return;
+
+      const localFile =
+        window.location.protocol === "file:" && event.origin === "null";
+      if (!ALLOWED_ORIGINS.includes(event.origin) && !localFile) {
+        // Hardop weigeren: anders lijkt het alsof de bookmarklet stuk is.
+        setToast(`⚠ Bericht geweigerd van onbekende herkomst (${event.origin})`);
+        return;
       }
+      if (token && event.data.token !== token) return;
+      if (typeof event.data.text !== "string") return;
+
+      const result = parseANPAgenda(event.data.text);
+      if (result.outdated) {
+        setToast(OUTDATED_MSG);
+        return;
+      }
+      if (result.items.length === 0) {
+        setToast("⚠ Geen items in ontvangen data");
+        return;
+      }
+      applyResult(
+        event.data.text,
+        result,
+        `✓ ${result.items.length} items automatisch geladen`
+      );
     };
     window.addEventListener("message", handler);
 
-    // Tell the bookmarklet (opener) we're ready to receive data
+    // Tell the bookmarklet (opener) we're ready to receive data. Het token
+    // komt uit onze eigen URL en bewijst aan de bookmarklet dat wij het
+    // venster zijn dat hij zelf geopend heeft.
     if (window.opener) {
       // Send multiple times in case opener wasn't ready yet
-      const sendReady = () => window.opener.postMessage({ type: "ANP_DASHBOARD_READY" }, "*");
+      const sendReady = () =>
+        window.opener.postMessage({ type: "ANP_DASHBOARD_READY", token }, "*");
       sendReady();
       setTimeout(sendReady, 100);
       setTimeout(sendReady, 500);
     }
 
     return () => window.removeEventListener("message", handler);
-  }, []);
+  }, [applyResult]);
 
   const allCats = useMemo(() => {
     if (!items.length) return [];
@@ -625,9 +791,31 @@ function ANPDashboard() {
     return [...catSet].sort();
   }, [items]);
 
+  // De dagen die in de zijbalk verschijnen. Voorbije dagen zitten er alleen
+  // bij als je er expliciet om vraagt.
+  const visibleDates = useMemo(() => {
+    const t = todayIso();
+    return (parsed?.dates || []).filter(d => showPast || !d.iso || d.iso >= t);
+  }, [parsed, showPast]);
+
+  // Wat de teller in de header laat zien. Het ruwe totaal zou items meetellen
+  // die door de vandaag-grens verborgen zijn, en dat spreekt het aantal dagen
+  // ernaast tegen.
+  const visibleItems = useMemo(() => {
+    const t = todayIso();
+    return items.filter(it => showPast || !it.iso || it.iso >= t);
+  }, [items, showPast]);
+
   const filteredItems = useMemo(() => {
+    const t = todayIso();
+    const clock = nowClock();
     return items.filter(it => {
-      if (activeDate && it.date !== activeDate) return false;
+      // Losstaand van activeIso: een klik op de actieve datumtab zet die op ""
+      // en zou anders alsnog alle voorbije dagen terugbrengen.
+      if (!showPast && it.iso && it.iso < t) return false;
+      if (activeIso && it.iso !== activeIso) return false;
+      // "Nog te komen" slaat alleen op vandaag; morgen komt sowieso nog.
+      if (upcomingOnly && it.iso === t && it.time && it.time < clock) return false;
       if (activeCats.size > 0 && !it.cats.some(c => activeCats.has(c))) return false;
       if (showStarredOnly && !it.starred) return false;
       if (searchQuery) {
@@ -636,10 +824,16 @@ function ANPDashboard() {
       }
       return true;
     });
-  }, [items, activeDate, activeCats, searchQuery, showStarredOnly]);
+  }, [items, activeIso, activeCats, searchQuery, showStarredOnly, showPast, upcomingOnly]);
 
   const toggleStar = useCallback((id) => {
-    setItems(prev => prev.map(it => it.id === id ? { ...it, starred: !it.starred } : it));
+    setItems(prev => {
+      const next = prev.map(it =>
+        it.id === id ? { ...it, starred: !it.starred } : it
+      );
+      saveStars(next.filter(it => it.starred).map(it => it.key));
+      return next;
+    });
   }, []);
 
   const toggleCat = useCallback((cat) => {
@@ -683,7 +877,7 @@ function ANPDashboard() {
           className="paste-textarea"
           value={rawText}
           onChange={e => setRawText(e.target.value)}
-          placeholder={"ANP AGENDA (opgehaald ...)\nPeriode: ...\n==================================================\n\n## dinsdag 3 maart\n\n00:00 | Voorbeeld item [Binnenland]\n  Beschrijving..."}
+          placeholder={"ANP AGENDA v4 (opgehaald ...) [fetch=...]\nPeriode: ...\n==================================================\n\n## dinsdag 3 maart 2027 [2027-03-03]\n\n00:00 | Voorbeeld item [Binnenland]\n  Beschrijving..."}
           autoFocus
         />
         <button
@@ -702,7 +896,9 @@ function ANPDashboard() {
   }
 
   // Dashboard view
-  const dateItems = parsed?.dates || [];
+  const today = todayIso();
+  const pastCount = items.filter(it => it.iso && it.iso < today).length;
+  const isStale = parsed?.fetchedIso && parsed.fetchedIso < today;
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#f8fafc" }}>
@@ -711,7 +907,10 @@ function ANPDashboard() {
         <div>
           <div className="dash-header-label">ANP Dashboard</div>
           <div className="dash-header-title">
-            {items.length} items · {dateItems.length} dagen
+            {visibleItems.length} items · {visibleDates.length} dagen
+            {parsed?.fetchedTime && (
+              <span className="fetch-stamp">opgehaald {parsed.fetchedTime}</span>
+            )}
           </div>
         </div>
         <div className="header-buttons" style={{ display: "flex", gap: 8 }}>
@@ -735,15 +934,17 @@ function ANPDashboard() {
           />
 
           <div className="sidebar-heading">Datum</div>
-          {dateItems.map(d => (
+          {visibleDates.map(d => (
             <button
-              key={d}
-              className={`sidebar-btn${activeDate === d ? " active" : ""}`}
-              onClick={() => setActiveDate(activeDate === d ? "" : d)}
+              key={d.iso || d.label}
+              className={`sidebar-btn${activeIso === d.iso ? " active" : ""}${
+                d.iso && d.iso < today ? " past" : ""
+              }`}
+              onClick={() => setActiveIso(activeIso === d.iso ? "" : d.iso)}
             >
-              {d}
+              {d.label}
               <span className="sidebar-count">
-                {items.filter(it => it.date === d).length}
+                {items.filter(it => it.iso === d.iso).length}
               </span>
             </button>
           ))}
@@ -755,12 +956,39 @@ function ANPDashboard() {
           >
             ★ Alleen gemarkeerd
           </button>
+          <button
+            className={`sidebar-btn${upcomingOnly ? " active" : ""}`}
+            onClick={() => setUpcomingOnly(!upcomingOnly)}
+          >
+            Alleen nog te komen
+          </button>
+          {pastCount > 0 && (
+            <button
+              className={`sidebar-btn${showPast ? " active" : ""}`}
+              onClick={() => {
+                const next = !showPast;
+                setShowPast(next);
+                // Terug naar vandaag, anders blijf je op een dag staan die
+                // net weer verdwenen is.
+                if (!next && activeIso && activeIso < today) {
+                  setActiveIso(pickDefaultIso(parsed?.dates || []));
+                }
+              }}
+            >
+              Toon afgelopen dagen
+              <span className="sidebar-count">{pastCount}</span>
+            </button>
+          )}
 
           <div className="sidebar-heading" style={{ marginTop: 8 }}>Categorie</div>
           <div style={{ maxHeight: 400, overflowY: "auto" }}>
             {allCats.map(cat => {
               const isActive = activeCats.has(cat);
-              const count = items.filter(it => it.cats.includes(cat) && (!activeDate || it.date === activeDate)).length;
+              const count = items.filter(it =>
+                it.cats.includes(cat) &&
+                (showPast || !it.iso || it.iso >= today) &&
+                (!activeIso || it.iso === activeIso)
+              ).length;
               return (
                 <button
                   key={cat}
@@ -790,10 +1018,19 @@ function ANPDashboard() {
 
         {/* Main content */}
         <div style={{ flex: 1, overflowY: "auto" }}>
+          {isStale && (
+            <div className="stale-banner">
+              ⚠ Deze agenda is opgehaald op {parsed.fetchedIso} en dus verouderd.
+              Klik de bookmarklet opnieuw op app.anp.nl voor de agenda van vandaag.
+            </div>
+          )}
           <div className="status-bar">
             <strong>{filteredItems.length}</strong> items
-            {activeDate && <span> · {activeDate}</span>}
+            {activeIso && (
+              <span> · {(visibleDates.find(d => d.iso === activeIso) || {}).label}</span>
+            )}
             {activeCats.size > 0 && <span> · {activeCats.size} categorie(ën)</span>}
+            {upcomingOnly && <span> · alleen nog te komen</span>}
             {searchQuery && <span> · zoek: "{searchQuery}"</span>}
           </div>
 
