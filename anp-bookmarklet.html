@@ -184,11 +184,15 @@
     <h2 style="margin-top: 24px;">Hoe werkt het?</h2>
     <div class="step">
       <div class="step-num">•</div>
-      <div class="step-text">De bookmarklet haalt items van alle ANP-kalenders (vandaag + 2 dagen)</div>
+      <div class="step-text">De bookmarklet haalt items van alle ANP-kalenders (vandaag + 4 dagen), één request per kalender per dag</div>
     </div>
     <div class="step">
       <div class="step-num">•</div>
       <div class="step-text">Stuurt de data via <code>postMessage</code> naar het dashboard in een nieuw tabblad</div>
+    </div>
+    <div class="step">
+      <div class="step-num">•</div>
+      <div class="step-text">Items buiten het venster (doorlopers met een startdatum in het verleden) worden weggefilterd</div>
     </div>
     <div class="step">
       <div class="step-num">•</div>
@@ -197,7 +201,8 @@
   </div>
 
   <div class="version">
-    ANP Nieuwstools v3 — NRC Nieuwsmanager
+    ANP Nieuwstools v4 — NRC Nieuwsmanager<br>
+    Al een oudere versie in je bladwijzerbalk? Verwijder die en sleep deze knop er opnieuw in — de bookmarklet-code zit in de bladwijzer zelf en werkt niet mee met updates.
   </div>
 </div>
 
@@ -215,100 +220,192 @@ function anpBookmarklet() {
   var DASHBOARD_URL = "__DASHBOARD_URL__";
   var base = "https://newsapi.anp.nl/services/";
   var hdrs = { "api-version": "1.0", "appid": "INZAGEWEB25" };
+  var NUM_DAYS = 5;
+  var CNT = 500;
+  var CONC = 6;
+
+  var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+  var iso = function (x) { return x.getFullYear() + "-" + pad(x.getMonth() + 1) + "-" + pad(x.getDate()); };
+  var day0 = function (x) { return new Date(x.getFullYear(), x.getMonth(), x.getDate()); };
+  var lab = function (x) { return x.toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long" }); };
+  var tim = function (x) { return x.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }); };
+  var one = function (s) { return String(s || "").replace(/\s+/g, " ").trim(); };
+
   var d = new Date();
-  var ds = d.toISOString().split("T")[0];
+  var wStart = day0(d);
+  var wEnd = new Date(wStart.getFullYear(), wStart.getMonth(), wStart.getDate() + NUM_DAYS);
+  var days = [];
+  for (var i = 0; i < NUM_DAYS; i++) {
+    var dd = new Date(wStart.getFullYear(), wStart.getMonth(), wStart.getDate() + i);
+    days.push({ iso: iso(dd), label: lab(dd) });
+  }
+
+  var box = document.createElement("div");
+  box.style.cssText = "position:fixed;z-index:2147483647;right:16px;bottom:16px;padding:10px 14px;background:#0f172a;color:#e2e8f0;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.35);font:13px/1.4 system-ui,-apple-system,sans-serif;pointer-events:none";
+  box.textContent = "ANP agenda ophalen…";
+  document.body.appendChild(box);
+  var st = function (t) { box.textContent = t; };
+  var stDone = function (t) { box.textContent = t; setTimeout(function () { box.remove(); }, 5000); };
+
+  function pool(makers, limit, onProg) {
+    return new Promise(function (resolve) {
+      var out = new Array(makers.length), next = 0, done = 0;
+      if (!makers.length) return resolve(out);
+      function launch() {
+        while (next < makers.length && next - done < limit) {
+          (function (k) {
+            makers[k]().then(function (v) { out[k] = v; }, function () { out[k] = null; })
+              .then(function () {
+                done++;
+                if (onProg) onProg(done, makers.length);
+                if (done === makers.length) resolve(out); else launch();
+              });
+          })(next++);
+        }
+      }
+      launch();
+    });
+  }
+
+  // Plaats item in het venster; null = buiten venster (niet tonen).
+  // Begonnen voor het venster maar eindigend erbinnen -> op de einddag,
+  // gemarkeerd als "Doorlopend".
+  function place(it) {
+    var s = it.eventStart ? new Date(it.eventStart) : null;
+    if (!s || isNaN(s.getTime())) return { iso: "", label: "Geen datum", time: "", run: false, sort: null };
+    var sd = day0(s);
+    if (sd >= wStart && sd < wEnd) return { iso: iso(sd), label: lab(sd), time: tim(s), run: false, sort: s };
+    if (sd < wStart) {
+      var re = it.eventEnd || it.eventEndDate || null;
+      var e = re ? new Date(re) : null;
+      if (e && !isNaN(e.getTime())) {
+        var ed = day0(e);
+        if (ed >= wStart && ed < wEnd) return { iso: iso(ed), label: lab(ed), time: tim(e), run: true, sort: e };
+      }
+    }
+    return null;
+  }
 
   fetch(base + "calendars", { headers: hdrs, credentials: "include" })
     .then(function (r) { return r.json(); })
     .then(function (cj) {
-      if (cj.hasError || !cj.data) { alert("Fout bij ophalen kalenders"); return; }
+      if (cj.hasError || !cj.data) { stDone("Fout bij ophalen kalenders"); alert("Fout bij ophalen kalenders"); return; }
       var cals = cj.data.filter(function (c) { return /^\d+$/.test(c.id); });
       var total = cals.length;
-      var ps = cals.map(function (c) {
-        var url = base + "calendars/" + c.id + "/items?expand=list&count=200&fromDate=" + ds + "&numDays=3";
-        return fetch(url, { headers: hdrs, credentials: "include" })
-          .then(function (r) { return r.json(); })
-          .then(function (j) { return { cat: c.name, items: (j.data && j.data.items) || [] }; })
-          .catch(function () { return { cat: c.name, items: [] }; });
+
+      // Eén request per kalender PER DAG: elke dag krijgt zijn eigen
+      // count-budget, zodat de laatste dag niet wordt afgekapt.
+      var tasks = [];
+      days.forEach(function (day, di) {
+        cals.forEach(function (c) {
+          tasks.push(function () {
+            var url = base + "calendars/" + c.id + "/items?expand=list&count=" + CNT + "&fromDate=" + day.iso + "&numDays=1";
+            return fetch(url, { headers: hdrs, credentials: "include" })
+              .then(function (r) { return r.json(); })
+              .then(function (j) { return { cat: c.name, di: di, items: (j.data && j.data.items) || [], failed: false }; })
+              .catch(function () { return { cat: c.name, di: di, items: [], failed: true }; });
+          });
+        });
       });
-      Promise.all(ps).then(function (results) {
-        var seen = {}, all = [];
-        results.forEach(function (r) {
-          r.items.forEach(function (it) {
-            var id = it.id;
-            if (!seen[id]) {
-              seen[id] = true;
-              var st = it.eventStart ? new Date(it.eventStart) : null;
-              all.push({
-                title: it.title || "Zonder titel",
-                intro: it.introText || "",
-                start: st,
-                date: st ? st.toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long" }) : "Geen datum",
-                time: st ? st.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }) : "",
-                cats: [r.cat]
-              });
-            } else {
-              for (var i = 0; i < all.length; i++) {
-                if (all[i].title === it.title) {
-                  if (all[i].cats.indexOf(r.cat) === -1) all[i].cats.push(r.cat);
-                  break;
-                }
+      st("ANP agenda ophalen… 0/" + tasks.length + " (" + total + " kalenders × " + NUM_DAYS + " dagen)");
+
+      pool(tasks, CONC, function (done, tot) { st("ANP agenda ophalen… " + done + "/" + tot); })
+        .then(function (results) {
+          var byId = Object.create(null), dropped = Object.create(null), all = [], trunc = [], failed = 0;
+          results.forEach(function (r) {
+            if (!r) { failed++; return; }
+            if (r.failed) failed++;
+            if (r.items.length >= CNT) trunc.push(r.cat + " (" + days[r.di].iso + ")");
+            r.items.forEach(function (it) {
+              var id = String(it.id != null ? it.id : one(it.title) + "|" + it.eventStart);
+              var ex = byId[id];
+              if (ex) {
+                if (ex.cats.indexOf(r.cat) === -1) ex.cats.push(r.cat);
+                return;
               }
+              var p = place(it);
+              if (!p) { dropped[id] = true; return; }
+              var cats = [r.cat];
+              if (p.run) cats.push("Doorlopend");
+              var item = {
+                title: one(it.title) || "Zonder titel",
+                intro: one(it.introText),
+                iso: p.iso, date: p.label, time: p.time, start: p.sort, cats: cats
+              };
+              byId[id] = item;
+              all.push(item);
+            });
+          });
+
+          var groups = Object.create(null);
+          all.forEach(function (a) {
+            var k = a.iso || "";
+            if (!groups[k]) groups[k] = { label: a.date, items: [] };
+            groups[k].items.push(a);
+          });
+          var keys = Object.keys(groups).sort(function (a, b) {
+            if (!a) return 1;
+            if (!b) return -1;
+            return a < b ? -1 : a > b ? 1 : 0;
+          });
+          keys.forEach(function (k) {
+            groups[k].items.sort(function (a, b) {
+              if (!a.start) return 1;
+              if (!b.start) return -1;
+              return a.start - b.start;
+            });
+          });
+
+          var perDay = days.map(function (x) {
+            var g = groups[x.iso];
+            return x.iso.slice(8) + "/" + x.iso.slice(5, 7) + ": " + (g ? g.items.length : 0);
+          }).join(" · ");
+
+          var s = "ANP AGENDA (opgehaald " + d.toLocaleString("nl-NL") + ")\n";
+          s += "Periode: " + days[0].iso + " t/m " + days[days.length - 1].iso + " (" + NUM_DAYS + " dagen) | Kalenders: " + total + " | Items: " + all.length + "\n";
+          s += "Per dag: " + perDay + "\n";
+          s += "Buiten venster genegeerd: " + Object.keys(dropped).length + (failed ? " | Mislukte requests: " + failed : "") + "\n";
+          if (trunc.length) s += "LET OP — limiet van " + CNT + " geraakt bij: " + trunc.join(", ") + "\n";
+          s += "==================================================\n\n";
+          keys.forEach(function (k) {
+            s += "## " + (k ? k + " | " : "") + groups[k].label + "\n\n";
+            groups[k].items.forEach(function (it) {
+              if (it.time) s += it.time + " | ";
+              s += it.title;
+              s += " [" + it.cats.join(", ") + "]";
+              s += "\n";
+              if (it.intro) s += "  " + it.intro + "\n";
+              s += "\n";
+            });
+          });
+          stDone(all.length + " items over " + keys.length + " dagen — dashboard opent…");
+
+          // postMessage handshake naar dashboard
+          var dataSent = false;
+          var ml = function (ev) {
+            if (!dataSent && ev.data && ev.data.type === "ANP_DASHBOARD_READY" && ev.source) {
+              ev.source.postMessage({ type: "ANP_AGENDA_DATA", text: s }, "*");
+              dataSent = true;
+              window.removeEventListener("message", ml);
             }
-          });
-        });
-        var dates = {}, dateOrder = [];
-        all.forEach(function (a) {
-          if (!dates[a.date]) { dates[a.date] = []; dateOrder.push(a.date); }
-          dates[a.date].push(a);
-        });
-        Object.keys(dates).forEach(function (k) {
-          dates[k].sort(function (a, b) {
-            if (!a.start) return 1;
-            if (!b.start) return -1;
-            return a.start - b.start;
-          });
-        });
-        var s = "ANP AGENDA (opgehaald " + d.toLocaleString("nl-NL") + ")\n";
-        s += "Periode: " + ds + " + 2 dagen | Kalenders: " + total + " | Items: " + all.length + "\n";
-        s += "==================================================\n\n";
-        dateOrder.forEach(function (dt) {
-          s += "## " + dt + "\n\n";
-          dates[dt].forEach(function (it) {
-            if (it.time) s += it.time + " | ";
-            s += it.title;
-            s += " [" + it.cats.join(", ") + "]";
-            s += "\n";
-            if (it.intro) s += "  " + it.intro + "\n";
-            s += "\n";
-          });
-        });
-        // postMessage handshake naar dashboard
-        var dataSent = false;
-        var ml = function (ev) {
-          if (!dataSent && ev.data && ev.data.type === "ANP_DASHBOARD_READY" && ev.source) {
-            ev.source.postMessage({ type: "ANP_AGENDA_DATA", text: s }, "*");
-            dataSent = true;
+          };
+          window.addEventListener("message", ml);
+          var dw = window.open(DASHBOARD_URL + "?autoload=1", "_blank");
+          if (!dw) {
             window.removeEventListener("message", ml);
+            navigator.clipboard.writeText(s)
+              .then(function () { alert("Popup geblokkeerd. " + all.length + " items naar klembord. Plak handmatig in dashboard."); })
+              .catch(function () { alert("Popup geblokkeerd. Sta popups toe voor app.anp.nl."); });
+            return;
           }
-        };
-        window.addEventListener("message", ml);
-        var dw = window.open(DASHBOARD_URL + "?autoload=1", "_blank");
-        if (!dw) {
-          window.removeEventListener("message", ml);
-          navigator.clipboard.writeText(s)
-            .then(function () { alert("Popup geblokkeerd. " + all.length + " items naar klembord. Plak handmatig in dashboard."); })
-            .catch(function () { alert("Popup geblokkeerd. Sta popups toe voor app.anp.nl."); });
-          return;
-        }
-        setTimeout(function () {
-          if (!dataSent) {
-            window.removeEventListener("message", ml);
-            navigator.clipboard.writeText(s).catch(function () {});
-          }
-        }, 30000);
-      }).catch(function (e) { alert("Fout bij items: " + e.message); });
-    }).catch(function (e) { alert("Fout bij kalenders: " + e.message); });
+          setTimeout(function () {
+            if (!dataSent) {
+              window.removeEventListener("message", ml);
+              navigator.clipboard.writeText(s).catch(function () {});
+            }
+          }, 30000);
+        }).catch(function (e) { stDone("Fout bij items: " + e.message); alert("Fout bij items: " + e.message); });
+    }).catch(function (e) { stDone("Fout bij kalenders: " + e.message); alert("Fout bij kalenders: " + e.message); });
 }
 
 // ─── Bouw de bookmarklet en zet de href ────────────────────────────

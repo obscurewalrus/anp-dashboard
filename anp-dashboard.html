@@ -147,6 +147,17 @@
     color: #f1f5f9;
     font-family: 'Source Serif 4', Georgia, serif;
   }
+  .dash-header-meta {
+    margin-top: 3px;
+    font-size: 10px;
+    line-height: 1.4;
+    color: #64748b;
+    font-family: 'JetBrains Mono', monospace;
+    max-width: 60ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .header-btn {
     padding: 6px 14px;
     font-size: 12px;
@@ -402,6 +413,7 @@ const CATEGORY_COLORS = {
   "Raad van State": "#b45309",
   "Uitspraken": "#92400e",
   "Requisitoir": "#78350f",
+  "Doorlopend": "#475569",
 };
 
 function getCatColor(cat) {
@@ -414,6 +426,7 @@ function parseANPAgenda(text) {
   const lines = text.split("\n");
   const items = [];
   let currentDate = "";
+  let currentIso = "";
   let i = 0;
   let meta = "";
 
@@ -426,7 +439,12 @@ function parseANPAgenda(text) {
     const line = lines[i];
 
     if (line.startsWith("## ")) {
-      currentDate = line.replace("## ", "").trim();
+      // Nieuw formaat: "## 2026-08-15 | zaterdag 15 augustus"
+      // Oud formaat:   "## zaterdag 15 augustus" (zonder ISO-datum)
+      const raw = line.replace("## ", "").trim();
+      const iso = raw.match(/^(\d{4}-\d{2}-\d{2})\s*\|\s*(.+)$/);
+      currentIso = iso ? iso[1] : "";
+      currentDate = iso ? iso[2].trim() : raw;
       i++;
       continue;
     }
@@ -448,6 +466,7 @@ function parseANPAgenda(text) {
       items.push({
         id: items.length,
         date: currentDate,
+        iso: currentIso,
         time,
         title,
         cats,
@@ -458,14 +477,41 @@ function parseANPAgenda(text) {
     i++;
   }
 
+  // Datums sorteren op de ISO-datum uit de kop. Alleen als die ontbreekt
+  // (agenda geplakt uit een oudere bookmarklet) vallen we terug op dag +
+  // maand met het huidige jaar erbij — die variant kan een datum uit een
+  // ander jaar niet onderscheiden.
   const dutchMonths = { januari:1, februari:2, maart:3, april:4, mei:5, juni:6, juli:7, augustus:8, september:9, oktober:10, november:11, december:12 };
+  const isoByDate = new Map();
+  items.forEach(it => {
+    if (!isoByDate.has(it.date)) isoByDate.set(it.date, it.iso || "");
+  });
+  const thisYear = new Date().getFullYear();
   function dateSortKey(d) {
+    const iso = isoByDate.get(d);
+    if (iso) return parseInt(iso.replace(/-/g, ""), 10);
     const m = d.match(/(\d+)\s+(\w+)/);
-    if (!m) return 99999;
-    return (dutchMonths[m[2].toLowerCase()] || 0) * 100 + parseInt(m[1], 10);
+    if (!m) return 99999999; // "Geen datum" achteraan
+    return thisYear * 10000 + (dutchMonths[m[2].toLowerCase()] || 0) * 100 + parseInt(m[1], 10);
   }
-  const dates = [...new Set(items.map(it => it.date))].sort((a, b) => dateSortKey(a) - dateSortKey(b));
+  const dates = [...isoByDate.keys()].sort((a, b) => dateSortKey(a) - dateSortKey(b));
   return { items, dates, meta: meta.trim() };
+}
+
+// Dag die het dashboard opent: die van vandaag als die in de agenda zit,
+// anders de eerste dag. Voorheen was dit altijd dates[0]; stond er een
+// doorloper van 1 januari in de data, dan opende het dashboard op die dag
+// en leek de rest van de agenda te ontbreken.
+function pickInitialDate(result) {
+  const now = new Date();
+  const pad = n => (n < 10 ? "0" : "") + n;
+  const todayIso = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate());
+  const byIso = result.items.find(it => it.iso === todayIso);
+  if (byIso) return byIso.date;
+  // Agenda zonder ISO-datums (oudere bookmarklet): match op het label.
+  const todayLabel = now.toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long" });
+  if (result.dates.includes(todayLabel)) return todayLabel;
+  return result.dates[0] || "";
 }
 
 // Toast component
@@ -563,7 +609,7 @@ function ANPDashboard() {
     }
     setParsed(result);
     setItems(result.items);
-    setActiveDate(result.dates[0] || "");
+    setActiveDate(pickInitialDate(result));
     setActiveCats(new Set());
     setView("dashboard");
     showToast(`✓ ${result.items.length} items geladen over ${result.dates.length} dagen`);
@@ -595,7 +641,7 @@ function ANPDashboard() {
           setRawText(text);
           setParsed(result);
           setItems(result.items);
-          setActiveDate(result.dates[0] || "");
+          setActiveDate(pickInitialDate(result));
           setActiveCats(new Set());
           setView("dashboard");
           setToast(`✓ ${result.items.length} items automatisch geladen`);
@@ -713,6 +759,11 @@ function ANPDashboard() {
           <div className="dash-header-title">
             {items.length} items · {dateItems.length} dagen
           </div>
+          {parsed?.meta && (
+            <div className="dash-header-meta" title={parsed.meta}>
+              {parsed.meta.split("\n").filter(l => l && !l.startsWith("=")).join(" · ")}
+            </div>
+          )}
         </div>
         <div className="header-buttons" style={{ display: "flex", gap: 8 }}>
           <button className="header-btn" onClick={copyAll}>Kopieer alles</button>
